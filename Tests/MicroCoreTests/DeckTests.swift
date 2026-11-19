@@ -7,7 +7,8 @@ final class DeckTests: XCTestCase {
         XCTAssertEqual(DeckInput(id: "ENC_CCW"), .turn(-1))
         XCTAssertEqual(DeckInput(id: "ENC_CW"), .turn(1))
         for d in ["left","right","up","down"] { XCTAssertEqual(DeckInput(id: "JOY_" + d.uppercased()), .direction(d)) }
-        XCTAssertNil(DeckInput(id: "ENC_PRESS"))
+        XCTAssertEqual(DeckInput(id: "ENC_PRESS"), .knobPress)
+        XCTAssertNil(DeckInput(id: "JOY_UNKNOWN"))
     }
     func testRecentSessionsExcludeClosedAndKeepSix() {
         let w = UUID(), ws = UUID()

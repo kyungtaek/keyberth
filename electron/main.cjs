@@ -1,0 +1,157 @@
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, Tray } = require('electron');
+const { spawn, spawnSync } = require('node:child_process');
+const { createInterface } = require('node:readline');
+const path = require('node:path');
+const { fileURLToPath } = require('node:url');
+
+const page = path.join(__dirname, 'index.html');
+const helper = app.isPackaged ? path.join(process.resourcesPath, 'KeyberthBridge')
+  : path.join(__dirname, '../.build/debug/MicroCompanion');
+let bridge, tray, editor, popup, quitting = false, serial = 0;
+const pending = new Map();
+let hud, hudTimer, hudMessage, hudReady = false;
+function showHud(message) {
+  hudMessage = message;
+  if (!hud) {
+    hud = new BrowserWindow({width:336, height:104, frame:false, transparent:true, show:false,
+      focusable:false, resizable:false, fullscreenable:false, skipTaskbar:true, hasShadow:false,
+      webPreferences:{preload:path.join(__dirname,'hud-preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false}});
+    hud.setIgnoreMouseEvents(true);
+    hud.setAlwaysOnTop(true, 'floating');
+    hud.setVisibleOnAllWorkspaces(true, {visibleOnFullScreen:true,skipTransformProcessType:true});
+    hud.webContents.once('did-finish-load', () => {
+      let applied = false;
+      try {
+        const glass = require('electron-liquid-glass');
+        applied = glass.isGlassSupported() && glass.addView(hud.getNativeWindowHandle(), {cornerRadius:24, opaque:false}) >= 0;
+      } catch (error) { console.warn('HUD material:', error.message); }
+      if (!applied) hud.setVibrancy('hud');
+      hudReady = true;
+      showHud(hudMessage);
+    });
+    hud.loadFile(path.join(__dirname,'hud.html'));
+    return;
+  }
+  if (!hudReady) return;
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).bounds;
+  const [width, height] = hud.getSize();
+  hud.setPosition(Math.round(area.x+(area.width-width)/2), Math.round(area.y+(area.height-height)/2));
+  hud.webContents.send('hud', message);
+  hud.showInactive();
+  clearTimeout(hudTimer);
+  hudTimer = setTimeout(() => hud.hide(), 1500);
+}
+function startBridge() {
+  const child = spawn(helper, process.argv.includes('--agent-diagnostics') ? ['--agent-diagnostics'] : [],
+    { stdio: ['pipe', 'pipe', 'inherit'] });
+  bridge = child;
+  const ended = () => {
+    if (bridge !== child) return;
+    bridge = null;
+    for (const request of pending.values()) request.reject(new Error('USB 서비스 연결이 끊겼습니다.'));
+    pending.clear();
+  };
+  child.on('error', ended);
+  child.on('exit', ended);
+  child.stdin.on('error', ended);
+  createInterface({ input: child.stdout }).on('line', line => {
+    let reply;
+    try { reply = JSON.parse(line); } catch { return; }
+    if (reply.event === 'hud') { showHud(reply); return; }
+    const request = pending.get(reply.id);
+    if (!request) return;
+    pending.delete(reply.id);
+    if (reply.error) request.reject(new Error(reply.error));
+    else request.resolve(reply.value);
+  });
+}
+
+function request(method, data = {}) {
+  if (!bridge) startBridge();
+  const id = ++serial;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error('기기 응답 시간 초과')); }, 24000);
+    pending.set(id, {
+      resolve(value) { clearTimeout(timer); resolve(value); },
+      reject(error) { clearTimeout(timer); reject(error); }
+    });
+    bridge.stdin.write(JSON.stringify({ ...data, method, id }) + '\n');
+  });
+}
+
+function makeWindow(isPopup) {
+  const win = new BrowserWindow({
+    width: isPopup ? 420 : 1080, height: isPopup ? 508 : 700,
+    minWidth: isPopup ? 420 : 840, minHeight: isPopup ? 508 : 580,
+    show: false, title: 'Keyberth', backgroundColor: '#141619',
+    frame: !isPopup, titleBarStyle: isPopup ? undefined : 'hiddenInset',
+    resizable: !isPopup, fullscreenable: !isPopup, skipTaskbar: isPopup,
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', event => event.preventDefault());
+  win.loadFile(page, { query: { view: isPopup ? 'sessions' : 'mapping', popup: String(isPopup) } });
+  if (isPopup) win.on('blur', () => win.hide());
+  win.on('close', event => { if (!quitting) { event.preventDefault(); win.hide(); } });
+  return win;
+}
+function openEditor(view = 'mapping') {
+  popup?.hide();
+  if (!editor) editor = makeWindow(false);
+  const win = editor;
+  const show = () => { win.webContents.send('view', view); win.show(); win.focus(); };
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', show);
+  else show();
+}
+function showPopup() {
+  if (!popup) popup = makeWindow(true);
+  if (popup.isVisible()) return popup.hide();
+  const a = tray.getBounds(), area = screen.getDisplayMatching(a).workArea;
+  const x = Math.round(a.x + (a.width - popup.getBounds().width) / 2);
+  popup.setPosition(Math.max(area.x, Math.min(x, area.x + area.width - 420)), Math.max(area.y, a.y + a.height + 4));
+  popup.show(); popup.focus();
+}
+ipcMain.handle('command', async (event, method, data) => {
+  if (fileURLToPath(event.senderFrame.url) !== page) throw new Error('Unknown window');
+  if (method === 'chooseNote') {
+    if (event.sender !== editor?.webContents) throw new Error('편집 창에서 문서를 선택하세요.');
+    const pick = await dialog.showOpenDialog(editor, {
+      title:'Obsidian 보관함 문서 선택', properties:['openFile'], filters:[{name:'Markdown 문서',extensions:['md']}]
+    });
+    if (pick.canceled || !pick.filePaths.length) return null;
+    const fs = require('node:fs/promises');
+    const note = pick.filePaths[0];
+    let folder = path.dirname(note);
+    while (folder !== path.dirname(folder)) {
+      if ((await fs.stat(path.join(folder,'.obsidian')).catch(() => null))?.isDirectory()) return 'obsidian-note:' + note;
+      folder = path.dirname(folder);
+    }
+    throw new Error('Obsidian 보관함 안의 Markdown 문서를 선택하세요.');
+  }
+  if (method === 'editor' && ['mapping','device','sessions'].includes(data?.view)) return openEditor(data.view);
+  if (!['state','catalog','save','select','connect','readPrefs','savePrefs','activateProfile','toggleAuto'].includes(method)) throw new Error('Unknown command');
+  const result = await request(method, data);
+  if (method === 'select' && event.sender === popup?.webContents) popup.hide();
+  return result;
+});
+if (process.argv.includes('--check-device')) {
+  app.exit(spawnSync(helper, ['--check-device'], { stdio: 'inherit' }).status ?? 1);
+} else if (!app.requestSingleInstanceLock()) app.quit();
+else {
+  app.on('second-instance', () => openEditor());
+  app.whenReady().then(() => {
+    app.dock?.hide();
+    startBridge();
+    const icon = nativeImage.createFromPath(path.join(__dirname, 'tray.png')).resize({width:18,height:18});
+    icon.setTemplateImage(true);
+    tray = new Tray(icon); tray.setToolTip('Keyberth · cmux'); tray.on('click', showPopup);
+    const items = [{ label:'키 매핑', click:()=>openEditor() }, { label:'기기 설정…', accelerator:'Cmd+,', click:()=>openEditor('device') },
+      {type:'separator'}, {label:'Keyberth 종료', role:'quit'}];
+    tray.on('right-click', () => tray.popUpContextMenu(Menu.buildFromTemplate(items)));
+    Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Keyberth', submenu:items},{role:'editMenu'},{role:'windowMenu'}]));
+    openEditor(process.argv.includes('--show-slots') ? 'sessions' : 'mapping');
+  });
+  app.on('activate', () => openEditor());
+  app.on('before-quit', () => { quitting = true; bridge?.stdin.end(); });
+  app.on('window-all-closed', () => {});
+}

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 432" fill="none">
+  <defs>
+    <g id="screw"><circle r="4.3" fill="#677476"/><circle r="2.7" fill="#323c42"/><path d="m-1.4 1.4 2.8-2.8" stroke="#a3adb0" stroke-width=".9"/></g>
+    <pattern id="hatch" width="3" height="3" patternUnits="userSpaceOnUse"><path d="M0 3 3 0" stroke="#758487" stroke-opacity=".18" stroke-width=".65"/></pattern>
+  </defs>
+  <rect x="1" y="1" width="438" height="430" rx="42" fill="#a1afae" stroke="#c3cccb" stroke-width="2"/>
+  <rect x="5" y="5" width="430" height="422" rx="38" fill="url(#hatch)" stroke="#c7d1cd"/>
+  <rect x="20" y="17" width="400" height="398" rx="24" fill="#d7ded8" stroke="#8e9c9c"/>
+  <rect x="24" y="21" width="392" height="390" rx="21" stroke="#ecf0e8"/>
+  <g><use href="#screw" x="42" y="39"/><use href="#screw" x="398" y="39"/><use href="#screw" x="42" y="393"/><use href="#screw" x="398" y="393"/></g>
+  <g transform="translate(0 2)"><rect x="49" y="334" width="11" height="5" rx="2.5" fill="#819994"/><rect x="49" y="343" width="11" height="5" rx="2.5" fill="#819994"/><rect x="49" y="352" width="11" height="5" rx="2.5" fill="#819994"/><circle cx="91" cy="346" r="16" fill="#242d30" stroke="#84908e"/></g>
+  <path d="M177 395h22m42 0h22" stroke="#97a59f"/>
+  <g fill="#748581"><circle cx="214" cy="395" r="1.6"/><circle cx="220" cy="395" r="1.6"/><circle cx="226" cy="395" r="1.6"/></g>
+</svg>

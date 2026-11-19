@@ -1,0 +1,113 @@
+/* The product photograph is oblique. The case, grid pitch and control centres
+   share this rectified 440 × 432 top view, including the unassigned touch area. */
+.stage {
+  background-image: none;
+  background-color: #171b1f;
+  border: 1px solid #2e3439;
+  border-radius: 14px;
+  padding: 15px;
+}
+.board {
+  position: relative;
+  width: min(100%, 460px, max(320px, calc((100vh - 287px) * 440 / 432)));
+  aspect-ratio: 440 / 432;
+  background: url("assets/ai-micro-shell.svg") center / 100% 100% no-repeat;
+  /* Key grid spans (49,41) to (391,384) in the shell illustration. */
+  padding: 0;
+  container-type: inline-size;
+  align-self: center;
+}
+.board > * {
+  position: absolute;
+  width: 18.65%;
+  height: 18.98%;
+  left: 11.14%;
+  top: 9.49%;
+}
+.board > :nth-child(4n+2) { left: 30.91%; }
+.board > :nth-child(4n+3) { left: 50.68%; }
+.board > :nth-child(4n)   { left: 70.45%; }
+.board > :nth-child(n+5):nth-child(-n+8) { top: 29.63%; }
+.board > :nth-child(n+9):nth-child(-n+12) { top: 49.77%; }
+.board > :nth-child(n+13) { top: 69.91%; }
+.cap {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto 1fr;
+  align-content: space-between;
+  align-items: start;
+  color: #172528;
+  background: #edf0e7;
+  border: 1px solid #83918b;
+  border-radius: 13% 13% 12% 12%;
+  padding: 1.65cqw;
+  text-align: left;
+}
+.cap img {
+  width: 4.3cqw;
+  height: 4.3cqw;
+  justify-self: end;
+}
+.keyNum {
+  font-size: clamp(16px,5cqw,25px);
+  font-weight: 620;
+  line-height: 1;
+  letter-spacing: -.085em;
+  font-variant-numeric: tabular-nums;
+}
+.capLabel {
+  grid-column: 1 / -1;
+  align-self: end;
+  font-size: clamp(10px,2.62cqw,13px);
+  line-height: 1.15;
+  font-weight: 560;
+  letter-spacing: -.04em;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.cap:hover { background: #fafff7; border-color: #465b55; }
+.cap[aria-pressed=true] {
+  background: #07565d;
+  border: 2px solid #07383d;
+  padding: calc(1.65cqw - 1px);
+  color: #eefffc;
+}
+.cap[aria-pressed=true] img { filter: brightness(0) invert(1); }
+.cap:focus-visible,.smallKey:focus-visible { outline: 3px solid #165fa7; outline-offset: 1px; z-index: 2; }
+.dial,.joy { background-position: center; background-size: contain; background-repeat: no-repeat; }
+.dial { background-image: url("assets/encoder.svg"); }
+.joy { background-image: url("assets/joystick.svg"); }
+.smallKey {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+.smallKey img { width: 78%; height: 78%; }
+.smallKey:hover,.smallKey[aria-pressed=true] { background: #0d5960; }
+.smallKey:hover img,.smallKey[aria-pressed=true] img,.joy img { filter: brightness(0) invert(.96); }
+.dial [data-control=ENC_PRESS] { inset: 24% 26% 32%; }
+.dial [data-control=ENC_PRESS][aria-pressed=true] { background: #6ecad133; outline: 2px solid #07565d; }
+.dial [data-control=ENC_CCW],.dial [data-control=ENC_CW] {
+  width: 34%; height: 34%; bottom: -1%;
+  background: #eff2e8; border: 1px solid #899890;
+}
+.dial [data-control=ENC_CCW] { left: 1%; }
+.dial [data-control=ENC_CW] { right: 1%; }
+.dial .smallKey[aria-pressed=true],.dial .smallKey:hover { background-color: #07565d; }
+.joy .smallKey { width: 33.33%; height: 33.33%; }
+.joy [data-control=JOY_UP] { left: 33.33%; top: 1%; }
+.joy [data-control=JOY_DOWN] { left: 33.33%; bottom: 1%; }
+.joy [data-control=JOY_LEFT] { left: 1%; top: 33.33%; }
+.joy [data-control=JOY_RIGHT] { right: 1%; top: 33.33%; }
+
+.cap[data-led] .keyNum::after { content:""; display:inline-block; width:7px; height:7px; margin-left:4px; border-radius:50%; background:var(--session-color,#778381); }
+.cap[data-led="2"] { --session-color:#248ce1; }
+.cap[data-led="3"] { --session-color:#df545b; }
+.cap[data-led="4"] { --session-color:#9864de; }

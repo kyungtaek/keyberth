@@ -71,16 +71,17 @@ public enum FunctionKey {
         return range.first { event.params.k == String(format: "ACT%02d", $0) }
     }
 
+    public static let modifiers = ["ctrl", "alt", "shift"]
+    public static let specialKeys = ["enter", "escape", "tab", "backspace", "delete", "up", "down", "left", "right", "home", "end", "space"] + (1...12).map { "f\($0)" }
+
     public static func shortcut(_ value: String) -> String? {
         let parts = value.lowercased().trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "+")
         guard let key = parts.last else { return nil }
         let modifiers = Array(parts.dropLast())
-        let allowed = ["ctrl", "alt", "shift"]
-        let named = ["enter", "escape", "tab", "backspace", "delete", "up", "down", "left", "right", "home", "end", "space"]
-        let functionKeys = (1...12).map { "f\($0)" }
+        let allowed = Self.modifiers
         let letter = key.utf8.count == 1 && key.utf8.allSatisfy { (97...122).contains($0) || (48...57).contains($0) }
         guard Set(modifiers).count == modifiers.count, modifiers.allSatisfy(allowed.contains),
-              named.contains(key) || functionKeys.contains(key) || (letter && !modifiers.isEmpty) else { return nil }
+              specialKeys.contains(key) || (letter && !modifiers.isEmpty) else { return nil }
         return (allowed.filter(modifiers.contains) + [key]).joined(separator: "+")
     }
 }

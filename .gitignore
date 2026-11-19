@@ -7,3 +7,5 @@ __pycache__/
 t3-adapter/.upstream/
 .env
 .env.*
+
+node_modules/

@@ -1,22 +1,31 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-args=()
-if [[ "${1:-}" == "--disable-sandbox" ]]; then args+=(--disable-sandbox); fi
-swift build "${args[@]}" -c debug
-bin="$(swift build "${args[@]}" -c debug --show-bin-path)"
+swift build "$@" --product MicroCompanion
+bin="$(swift build "$@" --show-bin-path)"
+if [[ ! -d node_modules/electron || ! -d node_modules/electron-liquid-glass ]]; then npm ci; fi
+node -e 'require("electron")'
 mkdir -p dist
 temp="$(mktemp -d "$PWD/dist/.package.XXXXXX")"
 trap 'rm -rf -- "$temp"' EXIT
 app="$temp/MicroCompanion.app"
-mkdir -p "$app/Contents/MacOS"
-mkdir -p "$app/Contents/Resources"
-install -m 644 Sources/MicroCompanion/Resources/keypad.png "$app/Contents/Resources/keypad.png"
-install -m 644 scripts/Keyberth.icns "$app/Contents/Resources/Keyberth.icns"
-install -m 644 scripts/MicroCompanion-Info.plist "$app/Contents/Info.plist"
-install -m 755 "$bin/MicroCompanion" "$app/Contents/MacOS/MicroCompanion"
-plutil -lint "$app/Contents/Info.plist"
-# Preserve previous bundle in the staging directory until replacement is in place.
+ditto node_modules/electron/dist/Electron.app "$app"
+res="$app/Contents/Resources"
+mkdir -p "$res/app"
+cp -R electron package.json package-lock.json "$res/app/"
+(cd "$res/app" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+rm -f "$res/default_app.asar"
+install -m 755 "$bin/MicroCompanion" "$res/KeyberthBridge"
+install -m 644 scripts/Keyberth.icns "$res/Keyberth.icns"
+mv "$app/Contents/MacOS/Electron" "$app/Contents/MacOS/MicroCompanion"
+plist="$app/Contents/Info.plist"
+plutil -replace CFBundleExecutable -string MicroCompanion "$plist"
+plutil -replace CFBundleIdentifier -string local.kent.microcmux "$plist"
+plutil -replace CFBundleName -string Keyberth "$plist"
+plutil -replace CFBundleDisplayName -string Keyberth "$plist"
+plutil -replace CFBundleIconFile -string Keyberth.icns "$plist"
+plutil -replace CFBundleShortVersionString -string 0.1.0 "$plist"
+plutil -replace LSUIElement -bool YES "$plist"
 dest="$PWD/dist/MicroCompanion.app"
 if [[ -e "$dest" ]]; then mv "$dest" "$temp/previous.app"; fi
 if ! mv "$app" "$dest"; then

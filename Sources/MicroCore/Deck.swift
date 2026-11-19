@@ -1,11 +1,12 @@
 import Foundation
 
 public enum DeckInput: Equatable {
-    case key(Int), turn(Int), direction(String)
+    case key(Int), turn(Int), knobPress, direction(String)
 
     public init?(id: String) {
         switch id {
         case "ENC_CCW": self = .turn(-1)
+        case "ENC_PRESS": self = .knobPress
         case "ENC_CW": self = .turn(1)
         case "JOY_LEFT", "JOY_RIGHT", "JOY_UP", "JOY_DOWN":
             self = .direction(id.dropFirst(4).lowercased())

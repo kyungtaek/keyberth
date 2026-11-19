@@ -15,13 +15,13 @@ enum AgentDevice {
 
     // Walk up from the callout node to its USB device. The location also ties
     // the CDC version reply to the HID collection used for input and lights.
-    static func port() throws -> (String, Int) {
+    static func port() throws -> (path: String, location: Int, instance: UInt64) {
         var iterator: io_iterator_t = 0
         guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching(kIOSerialBSDServiceValue), &iterator) == KERN_SUCCESS else {
             throw CompanionError("USB 시리얼 목록을 읽을 수 없습니다.")
         }
         defer { IOObjectRelease(iterator) }
-        var matches: [(String, Int)] = []
+        var matches: [(String, Int, UInt64)] = []
         while case let entry = IOIteratorNext(iterator), entry != 0 {
             defer { IOObjectRelease(entry) }
             func property(_ key: String) -> Any? {
@@ -32,13 +32,15 @@ enum AgentDevice {
                   path.hasPrefix("/dev/cu.usbmodem"),
                   property("idVendor") as? Int == 0x303a, property("idProduct") as? Int == 0x8360,
                   let location = property("locationID") as? Int else { continue }
-            matches.append((path, location))
+            var instance: UInt64 = 0
+            guard IORegistryEntryGetRegistryEntryID(entry, &instance) == KERN_SUCCESS else { continue }
+            matches.append((path, location, instance))
         }
         guard matches.count == 1 else { throw CompanionError("AI Micro USB 연결 \(matches.count)개 · 한 대를 연결하세요.") }
         return matches[0]
     }
 
-    static func verify(_ path: String) throws {
+    static func withSerial<T>(_ path: String, perform: (Int32) throws -> T) throws -> T {
         let fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK)
         guard fd >= 0 else { throw CompanionError("USB 포트를 열 수 없습니다. 사용 중인 앱을 확인하세요.") }
         defer { close(fd) }
@@ -51,10 +53,14 @@ enum AgentDevice {
         cfsetspeed(&mode, speed_t(B115200))
         guard tcsetattr(fd, TCSANOW, &mode) == 0 else { throw CompanionError("USB 통신 설정 실패") }
         tcflush(fd, TCIFLUSH)
-        let command = Array("UPDATE_INFO\n".utf8)
-        guard write(fd, command, command.count) == command.count else { throw CompanionError("펌웨어 조회 실패") }
+        return try perform(fd)
+    }
+
+    static func query(_ fd: Int32, command: String, prefix: String) throws -> Data {
+        let bytes = Array((command + "\n").utf8)
+        guard write(fd, bytes, bytes.count) == bytes.count else { throw CompanionError("USB 명령 전송 실패") }
         var data = Data(), buffer = [UInt8](repeating: 0, count: 2048)
-        let deadline = ProcessInfo.processInfo.systemUptime + 3
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
         while ProcessInfo.processInfo.systemUptime < deadline {
             var item = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
             guard poll(&item, 1, 100) > 0 else { continue }
@@ -64,19 +70,27 @@ enum AgentDevice {
             while let end = data.firstIndex(of: 10) {
                 let line = data[..<end]
                 data.removeSubrange(...end)
-                let prefix = Data("CMUPDATE_INFO\t".utf8)
-                guard line.starts(with: prefix) else { continue }
-                let json = try JSONSerialization.jsonObject(with: Data(line.dropFirst(prefix.count))) as? [String: Any]
-                guard json?["firmwareVersion"] as? String == firmware,
-                      json?["hardwareRevision"] as? String == "AI Micro" else {
-                    throw CompanionError("지원 대상과 다른 펌웨어입니다.")
-                }
-                return
+                let header = Data((prefix + "\t").utf8)
+                if line.starts(with: header) { return Data(line.dropFirst(header.count)) }
             }
             if data.count > 16384 { break }
         }
-        throw CompanionError("펌웨어 응답 시간 초과")
+        throw CompanionError("USB 응답 시간 초과 · " + prefix)
     }
+
+    static func verify(_ fd: Int32) throws {
+        let data = try query(fd, command: "UPDATE_INFO", prefix: "CMUPDATE_INFO")
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard json?["firmwareVersion"] as? String == firmware,
+              json?["hardwareRevision"] as? String == "AI Micro" else {
+            throw CompanionError("지원 대상과 다른 펌웨어입니다.")
+        }
+    }
+
+    static func verify(_ path: String) throws {
+        try withSerial(path, perform: verify)
+    }
+
 }
 
 final class AgentHID {
@@ -84,6 +98,7 @@ final class AgentHID {
     private let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 20)
     private let session = UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "")
     private let status: (String) -> Void
+    private let release: (DeckInput) -> Void
     private let press: (DeckInput) -> Void
     private var decoder = UniversalAgent.Decoder()
     private var timer: Timer?
@@ -96,8 +111,9 @@ final class AgentHID {
     private var stopped = false
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
-    init(location: Int, status: @escaping (String) -> Void, press: @escaping (DeckInput) -> Void) throws {
+    init(location: Int, status: @escaping (String) -> Void, release: @escaping (DeckInput) -> Void = { _ in }, press: @escaping (DeckInput) -> Void) throws {
         self.status = status
+        self.release = release
         self.press = press
         let manager = IOHIDManagerCreate(nil, 0)
         IOHIDManagerSetDeviceMatching(manager, [kIOHIDTransportKey: "USB", kIOHIDVendorIDKey: 0x303a,
@@ -195,7 +211,7 @@ final class AgentHID {
             guard e.seq == inputSeq + 1 else { fail("USB 입력 순서 불일치"); return }
             inputSeq = e.seq
             trace("input \(e.seq) \(e.id) \(e.pressed)")
-            if e.pressed, let input = DeckInput(id: e.id) { press(input) }
+            if let input = DeckInput(id: e.id) { (e.pressed ? press : release)(input) }
         case "MKERR": fail("기기가 명령을 거부했습니다 · " + String(payload.prefix(80)))
         default: break
         }

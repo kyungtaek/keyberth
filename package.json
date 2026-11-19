@@ -1,0 +1,17 @@
+{
+  "name": "keyberth",
+  "productName": "Keyberth",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "swift build --product MicroCompanion && electron .",
+    "package": "bash scripts/package.sh"
+  },
+  "devDependencies": {
+    "electron": "45.4.1"
+  },
+  "dependencies": {
+    "electron-liquid-glass": "1.1.1"
+  }
+}
