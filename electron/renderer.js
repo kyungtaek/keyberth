@@ -25,7 +25,6 @@ function group(cls) {
   node.className = cls;
   return node;
 }
-const fixed = {ENC_CW:'다음 키맵', ENC_CCW:'이전 키맵', ENC_PRESS:'자동 전환 켬/끔'};
 function draftKey() { return state.profile + '/' + selected; }
 function binding(id) { return state.mappings[id] || id; }
 const notePrefix = 'obsidian-note:';
@@ -134,7 +133,7 @@ function draft() {
 function renderMapping() {
   const saved=binding(selected), d=drafts.get(draftKey())||fromBinding(saved);
   for(const [id,b] of buttons) {
-    const title=byId.get(id).name+' · '+(fixed[id] || actionText(binding(id)));
+    const title=byId.get(id).name+' · '+actionText(binding(id));
     b.title=title; b.setAttribute('aria-label',title);b.setAttribute('aria-pressed',String(id===selected));
     if (id.startsWith('K')) {
       const assigned = binding(id);
@@ -160,9 +159,9 @@ function renderMapping() {
   }
   $('keyTitle').textContent=selected.startsWith('K')?Number(selected.slice(1))+'번 키':byId.get(selected).name;
   $('keyId').textContent=selected;$('current').textContent=actionText(saved);
-  const locked = state.profile==='unconfigured' || !!fixed[selected], desktop = state.profile !== 'cmux';
+  const locked = state.profile==='unconfigured', desktop = state.profile !== 'cmux';
   $('actionMode').parentElement.hidden=locked;
-  $('current').textContent=locked ? (fixed[selected] || actionText(saved)) : actionText(saved);
+  $('current').textContent=actionText(saved);
   $('noteMode').hidden=!(state.profile==='obsidian' && /^K0[1-6]$/.test(selected));
   $('noteFields').hidden=locked || d.mode!=='note';
   if(locked){

@@ -19,7 +19,7 @@ struct KeymapArchive: Codable {
     let claudeSlots:ClaudeSlots?
 
     static func accepts(_ value:String, input:String, profile p:AppProfile) -> Bool {
-        guard KeyMap.controls.contains(input), AppProfile.fixedAction(input) == nil, !value.isEmpty, value.utf8.count <= 4096 else { return false }
+        guard KeyMap.controls.contains(input), !value.isEmpty, value.utf8.count <= 4096 else { return false }
         if p == .cmux { return KeyMap.controls.contains(value) || FunctionKey.shortcut(value) != nil }
         return p.agentActions[value] != nil || value == "none" || DesktopShortcut.valid(value)
             || (p == .slack && SlackAction.input(value) != nil)

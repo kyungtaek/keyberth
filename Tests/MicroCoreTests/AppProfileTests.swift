@@ -2,18 +2,13 @@ import XCTest
 @testable import MicroCore
 
 final class AppProfileTests: XCTestCase {
-    func testEncoderCycleWrapsInBothDirections() {
-        var profile = AppProfile.cmux
-        var seen: [AppProfile] = []
-        for _ in AppProfile.allCases {
-            seen.append(profile)
-            let next = profile.advanced(by: 1)
-            XCTAssertEqual(next.advanced(by: -1), profile)
-            profile = next
+    func testEncoderDefaultsBelongToEachProfile() {
+        for input in ["ENC_CCW","ENC_CW","ENC_PRESS"] {
+            XCTAssertEqual(AppProfile.cmux.defaultBinding(input), input)
+            for profile in AppProfile.initial where profile != .cmux {
+                XCTAssertEqual(profile.defaultBinding(input), "none")
+            }
         }
-        XCTAssertEqual(seen, [.cmux,.t3,.codex,.claude,.claudeCode])
-        XCTAssertEqual(profile, .cmux)
-        XCTAssertNil(AppProfile.fixedAction("TOUCH"))
     }
 
     func testSlackActionCoverageAndUnreadPermalinks() {
@@ -80,6 +75,5 @@ final class AppProfileTests: XCTestCase {
         XCTAssertEqual(AppProfile.cmux.defaultBinding("K01"), "K01")
         XCTAssertEqual(AppProfile.slack.defaultBinding("K01"), "slack.K01")
         XCTAssertEqual(AppProfile.obsidian.defaultBinding("K01"), "cmd+o")
-        XCTAssertTrue(["ENC_CW","ENC_CCW","ENC_PRESS"].allSatisfy { AppProfile.fixedAction($0) != nil })
     }
 }

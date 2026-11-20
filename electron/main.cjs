@@ -163,13 +163,25 @@ else {
     startBridge();
     const icon = nativeImage.createFromPath(path.join(__dirname, 'tray.png')).resize({width:18,height:18});
     icon.setTemplateImage(true);
-    tray = new Tray(icon); tray.setToolTip('Keyberth · cmux'); tray.on('click', showPopup);
+    tray = new Tray(icon); tray.setToolTip('Keyberth'); tray.on('click', showPopup);
     const permissionGuide = installPermissionGuide(request, () => editor);
     const checkUpdates = require('./updates.cjs').configureUpdates(() => { quitting = true; });
     const items = [{ label:'키 매핑', click:()=>openEditor() }, { label:'기기 설정…', accelerator:'Cmd+,', click:()=>openEditor('device') },
       {label:'권한 안내…', click:()=>{ openEditor(); permissionGuide.showOnDemand(); }},
       {label:'업데이트 확인…',click:checkUpdates}, {type:'separator'}, {label:'Keyberth 종료', role:'quit'}];
-    tray.on('right-click', () => tray.popUpContextMenu(Menu.buildFromTemplate(items)));
+    tray.on('right-click', async () => {
+      let controls;
+      try {
+        const state = await request('state');
+        const change = (method, data) => request(method, data).catch(error => dialog.showErrorBox('키맵 변경 실패', error.message));
+        controls = [{label:'포커스된 앱으로 자동 전환', type:'checkbox', checked:state.automatic, click:()=>change('toggleAuto')},
+          ...state.profiles.map(profile => ({label:profile.name, type:'radio', checked:profile.id === state.profile,
+            click:()=>change('activateProfile', {profile:profile.id})}))];
+      } catch {
+        controls = [{label:'키맵 연결 대기 중', enabled:false}];
+      }
+      tray.popUpContextMenu(Menu.buildFromTemplate([...controls, {type:'separator'}, ...items]));
+    });
     Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Keyberth', submenu:items},{role:'editMenu'},{role:'windowMenu'}]));
     openEditor(process.argv.includes('--show-slots') ? 'sessions' : 'mapping');
     permissionGuide.checkAtStartup();

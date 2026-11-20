@@ -56,16 +56,6 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
         }
     }
 
-    public func advanced(by direction: Int) -> Self {
-        let all = Self.allCases
-        guard let index=all.firstIndex(of:self) else { return self }
-        return all[(index + (direction < 0 ? -1 : 1) + all.count) % all.count]
-    }
-
-    public static func fixedAction(_ input: String) -> String? {
-        ["ENC_CW":"다음 키맵", "ENC_CCW":"이전 키맵", "ENC_PRESS":"자동 전환 켬/끔"][input]
-    }
-
     public var hasRecentSessions: Bool { [.t3, .claudeCode, .claude, .codex].contains(self) }
 
     public var agentActions: [String:String] {

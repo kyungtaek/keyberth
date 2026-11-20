@@ -260,13 +260,8 @@ import MicroCore
     private var queue: [(DeckInput, CmuxTarget?, String?)] = []
     private func handle(_ physical: DeckInput) {
         let code = KeyMap.code(physical)
-        switch physical {
-        case .turn(let direction):
-            guard let i=enabled.firstIndex(of:profile) else {return}
-            activate(enabled[(i + (direction < 0 ? -1 : 1) + enabled.count) % enabled.count]); return
-        case .knobPress: toggleAutomatic(); return
-        default: break
-        }
+        // Rotation is a detent, so a held binding must finish within this event.
+        defer { if case .turn = physical { release(physical) } }
         guard profile != .unconfigured else { return }
         let binding = binding(code, in:profile)
         if profile == .cmux, binding == "K11" || binding == "space" {
@@ -658,7 +653,7 @@ import MicroCore
                 result["value"] = state()
             case "save":
                 guard let id = r.profile, let p = AppProfile(rawValue:id), enabled.contains(p),
-                      let input = r.input, KeyMap.controls.contains(input), AppProfile.fixedAction(input) == nil,
+                      let input = r.input, KeyMap.controls.contains(input),
                       let binding = r.binding,
                       KeymapArchive.accepts(binding,input:input,profile:p) else {
                     throw CompanionError("단축키 조합을 확인하세요.")
