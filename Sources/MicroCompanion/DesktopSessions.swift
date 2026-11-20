@@ -8,20 +8,23 @@ struct DesktopSession {
 }
 
 enum DesktopSessions {
-    static func read(_ profile: AppProfile) throws -> [DesktopSession] {
+    static func read(_ profile: AppProfile, pendingT3Only: Bool = false) throws -> [DesktopSession] {
         if profile == .claude { return try ClaudeControls.sessions() }
         let home = FileManager.default.homeDirectoryForCurrentUser
         let codex = profile == .codex
         let db = home.appendingPathComponent(codex ? ".codex/state_5.sqlite" : ".t3/userdata/statev2.sqlite")
+        let pending = "EXISTS (SELECT 1 FROM orchestration_v2_projection_runtime_requests q WHERE q.thread_id=t.thread_id AND q.status='pending')"
+        let scope = pendingT3Only ? "AND "+pending : ""
+        let limit = pendingT3Only ? "" : "LIMIT 6"
         let sql = codex ? """
             SELECT id, substr(coalesce(nullif(name,''), title),1,160) AS title, rollout_path
             FROM threads WHERE archived=0 AND originator IN ('Codex Desktop','codex_work_desktop')
             ORDER BY coalesce(recency_at_ms,updated_at_ms,updated_at*1000) DESC,id LIMIT 6
             """ : """
             SELECT thread_id AS id,substr(title,1,160) AS title,
-            CASE WHEN EXISTS (SELECT 1 FROM orchestration_v2_projection_runtime_requests q WHERE q.thread_id=t.thread_id AND q.status='pending')
+            CASE WHEN \(pending)
             THEN 'attention' ELSE (SELECT r.status FROM orchestration_v2_projection_runs r WHERE r.thread_id=t.thread_id ORDER BY r.ordinal DESC LIMIT 1) END AS status
-            FROM orchestration_v2_projection_threads t WHERE archived_at IS NULL AND deleted_at IS NULL ORDER BY updated_at DESC,thread_id LIMIT 6
+            FROM orchestration_v2_projection_threads t WHERE archived_at IS NULL AND deleted_at IS NULL \(scope) ORDER BY updated_at DESC,thread_id \(limit)
             """
         func query(_ location: String) throws -> Data {
             try CmuxClient.run(["-readonly","-json",location,sql], executable:"/usr/bin/sqlite3")

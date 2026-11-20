@@ -55,7 +55,7 @@ public enum Probe: String, CaseIterable {
     }
 }
 
-private func basicFrames(_ rpc: [String: Any]) throws -> [[UInt8]] {
+func basicFrames(_ rpc: [String: Any]) throws -> [[UInt8]] {
         let payload = Array(try JSONSerialization.data(withJSONObject: rpc, options: [.sortedKeys])) + [10]
         return stride(from: 0, to: payload.count, by: 61).map { start in
             let chunk = Array(payload[start..<min(start + 61, payload.count)])

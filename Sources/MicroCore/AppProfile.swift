@@ -39,7 +39,9 @@ public enum AppProfile: String, CaseIterable {
     public var agentActions: [String:String] {
         guard hasRecentSessions else { return [:] }
         var entries = Dictionary(uniqueKeysWithValues: (1...6).map { ("recent.\($0)", "최근 세션 \($0)") })
-        if self != .t3 {
+        if self == .t3 {
+            for entry in Self.t3Controls { entries[entry.action] = entry.label }
+        } else {
             entries.merge(["agent.fast": self == .claude ? "모델 · 사고 수준 선택" : "Fast 모드 전환",
                            "agent.approve":"이번 요청 승인", "agent.decline":"요청 거절", "agent.fork":"대화 분기",
                            "agent.mic":"마이크 받아쓰기", "agent.newChat":"새 대화", "agent.submit":"보내기", "agent.plan":self == .claude ? "계획 모드 선택" : "계획 모드 전환",
@@ -48,10 +50,18 @@ public enum AppProfile: String, CaseIterable {
         return entries
     }
 
+    private static let t3Controls: [(input:String, action:String, label:String)] = [
+        ("JOY_DOWN","agent.terminal","터미널 열기/닫기"), ("JOY_RIGHT","agent.rightPanel","오른쪽 사이드 패널 열기/닫기"),
+        ("K07","agent.nextPending","다음 입력 대기 세션"), ("K08","agent.approve","이번 요청 승인"),
+        ("K09","agent.decline","요청 거부"), ("K10","agent.fork","현재 세션 포크"),
+        ("K11","agent.dictate","음성 입력"), ("K12","agent.newChat","새 대화"), ("K13","agent.submit","보내기")
+    ]
+
     public func defaultBinding(_ input: String) -> String {
         if self == .cmux { return input }
         if self == .slack { return SlackAction.binding(input) ?? "none" }
         if hasRecentSessions, let index = (1...6).first(where: { String(format:"K%02d", $0) == input }) { return "recent.\(index)" }
+        if self == .t3, let control = Self.t3Controls.first(where:{ $0.input == input }) { return control.action }
         if self == .claude || self == .codex {
             return ["K07":"agent.fast","K08":"agent.approve","K09":"agent.decline","K10":"agent.fork","K11":"agent.mic","K12":"agent.newChat","K13":"agent.submit",
                     "JOY_UP":"agent.plan","JOY_DOWN":"agent.sidebar","JOY_LEFT":"agent.back","JOY_RIGHT":"agent.forward"][input] ?? "none"

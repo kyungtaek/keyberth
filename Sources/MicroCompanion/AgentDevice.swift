@@ -105,6 +105,29 @@ final class AgentHID {
     private var seq = 0, inputSeq = 0
     private var stage = 0
     private var pending: (name: String, value: String?, deadline: TimeInterval)?
+    private let location: Int
+    private var wantedLighting: LightingOutput.Frame?
+    private var lastLighting: LightingOutput.Frame?
+    private var lightingBusy = false
+    private(set) var lightingStatus = ""
+    func retryLighting() { lastLighting = nil }
+    private func applyLighting() {
+        guard !lightingBusy, let desired = wantedLighting, desired != lastLighting else { return }
+        lightingBusy = true
+        lastLighting = desired
+        lightingStatus = "조명 적용 중"
+        let location = self.location
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            let message: String
+            do { try LightingOutput.apply(desired,location:location); message = "기기에서 조명 설정 수신" }
+            catch { message = error.localizedDescription }
+            DispatchQueue.main.async { [weak self, message] in
+                guard let self, !self.stopped else { return }
+                self.lightingBusy = false
+                self.lightingStatus = message
+            }
+        }
+    }
     private var frame: String?, selected: String?
     private var sentFrame: String?, sentSelected: String?
     private var lastWrite = 0.0
@@ -112,6 +135,7 @@ final class AgentHID {
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     init(location: Int, status: @escaping (String) -> Void, release: @escaping (DeckInput) -> Void = { _ in }, press: @escaping (DeckInput) -> Void) throws {
+        self.location = location
         self.status = status
         self.release = release
         self.press = press
@@ -143,8 +167,9 @@ final class AgentHID {
         RunLoop.main.add(timer, forMode: .common)
         tick()
     }
-    func display(_ states: [SessionLight], selected index: Int?) {
+    func display(_ states: [SessionLight], selected index: Int?, palette:SessionLighting? = nil) {
         guard states.count == 6 else { return }
+        wantedLighting = palette.map { LightingOutput.Frame(palette:$0,states:states,selected:index) }
         frame = states.map(\.agentCode).joined()
         selected = String(index.map { $0 + 1 } ?? 0)
     }
@@ -176,7 +201,10 @@ final class AgentHID {
             default:
                 if let frame, frame != sentFrame { try command("AMFRAME", frame) }
                 else if let selected, selected != sentSelected { try command("AMSELECT", selected) }
-                else if now - lastWrite >= 1 { try command("AMHEARTBEAT") }
+                else {
+                    applyLighting()
+                    if now - lastWrite >= 1 { try command("AMHEARTBEAT") }
+                }
             }
         } catch { fail(error.localizedDescription) }
     }
@@ -200,8 +228,8 @@ final class AgentHID {
             switch request.name {
             case "AMMODE": stage = 2
             case "AMKEYMODE": stage = 3; status("USB 연결됨 · " + AgentDevice.firmware)
-            case "AMFRAME": sentFrame = request.value; trace("frame ACK " + (sentFrame ?? ""))
-            case "AMSELECT": sentSelected = request.value; trace("selected ACK " + (sentSelected ?? ""))
+            case "AMFRAME": lastLighting = nil; sentFrame = request.value; trace("frame ACK " + (sentFrame ?? ""))
+            case "AMSELECT": lastLighting = nil; sentSelected = request.value; trace("selected ACK " + (sentSelected ?? ""))
             default: break
             }
         case "AMINPUT":
@@ -220,6 +248,7 @@ final class AgentHID {
         if CommandLine.arguments.contains("--agent-diagnostics") { fputs(value + "\n", stderr) }
     }
     private func fail(_ reason: String) {
+        lightingStatus = "USB 재연결 필요"
         stopped = true
         timer?.invalidate()
         status(reason + " · 다시 연결하세요.")

@@ -17,3 +17,14 @@ aside{gap:14px}
 .profileControls button[aria-pressed=true] {color:var(--cyan);}
 .mods {flex-wrap:wrap;}
 #noteTitle {display:block;margin:8px 0 14px;overflow-wrap:anywhere;}
+
+#device {height:calc(100vh - 96px);overflow-y:auto}
+#lighting {margin:24px 0 8px;border-top:1px solid var(--line);padding-top:18px}
+#lighting h2 {font-size:24px;margin-bottom:12px}
+#lighting > select {width:min(100%,320px)}
+.lightRow {display:grid;grid-template-columns:minmax(90px,1fr) 46px minmax(110px,170px);align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
+.lightRow input {width:40px;height:32px;border:1px solid var(--line);border-radius:6px;background:transparent;padding:2px}
+#lighting .legend {margin:10px 0}
+#lightStatus {margin-right:auto;color:var(--muted)}
+
+.slotIndex.coloredSlot::after {content:"";display:inline-block;width:7px;height:7px;margin-left:5px;border-radius:50%;background:var(--slot-dot)}

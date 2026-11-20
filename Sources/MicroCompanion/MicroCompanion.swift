@@ -123,13 +123,18 @@ import MicroCore
             updateLights()
         }
     }
+    private var palette: SessionLighting? = {
+        guard let data = KeyMap.preferences.data(forKey:"sessionLighting"),
+              let saved = try? JSONDecoder().decode(SessionLighting.self,from:data), saved.valid else { return nil }
+        return saved
+    }()
     private func updateLights() {
-        if profile == .cmux { device?.display(lights, selected: rows.firstIndex { $0?.active == true }); return }
+        if profile == .cmux { device?.display(lights, selected: rows.firstIndex { $0?.active == true }, palette:palette); return }
         let states: [SessionLight] = KeyMap.keys.prefix(6).map { key in
             guard let index = recentIndex(binding(key,in:profile)), sessions.indices.contains(index) else { return .empty }
             return sessions[index].light
         }
-        device?.display(states,selected:nil)
+        device?.display(states,selected:nil,palette:palette)
     }
     private func recentIndex(_ value:String) -> Int? { (1...6).first { value == "recent."+String($0) }.map { $0-1 } }
     private var queue: [(DeckInput, CmuxTarget?, String?)] = []
@@ -157,7 +162,8 @@ import MicroCore
                         catch { feedback = error.localizedDescription; hud(feedback) }
                     }
                 } else if binding.hasPrefix("agent."), profile.agentActions[binding] != nil {
-                    if binding == "agent.mic" {
+                    if profile == .t3 { performT3(binding) }
+                    else if binding == "agent.mic" {
                         if micProfile == nil { try AssistantControls.perform(binding,in:profile); micProfile=profile }
                         micKeys.insert(code)
                     } else { try AssistantControls.perform(binding,in:profile) }
@@ -173,6 +179,20 @@ import MicroCore
             enqueue(action)
         }
         else if let chord = FunctionKey.shortcut(binding) { enqueue(physical, chord: chord) }
+    }
+    private var t3Busy = false
+    private func performT3(_ action:String) {
+        guard !t3Busy else { hud("T3 동작 처리 중"); return }
+        let generation=sessionGeneration
+        t3Busy = true
+        Task {
+            defer { t3Busy = false }
+            do {
+                guard sessionGeneration == generation else { return }
+                try await T3Controls.perform(action, stillActive:{ self.sessionGeneration == generation })
+                feedback = ""
+            } catch { feedback=error.localizedDescription; hud(feedback) }
+        }
     }
     private var slackQueue = [String]()
     private var processingSlack = false
@@ -280,6 +300,7 @@ import MicroCore
                 })
             } catch { deviceStatus = error.localizedDescription }
             connecting = false
+            updateLights()
             refresh()
         }
     }
@@ -330,10 +351,12 @@ import MicroCore
         let input, binding, target, profile: String?
         let volume, sleep: Int?
         let revision: UInt32?
+        let lightState: String?
+        let rule: SessionLighting.Rule?
     }
 
     private func state() -> [String: Any] {
-        let slots: [[String: Any]] = rows.indices.map { index in
+        var slots: [[String: Any]] = rows.indices.map { index in
             if profile != .cmux {
                 let row = sessions.indices.contains(index) ? sessions[index] : nil
                 let light = row?.light ?? .empty
@@ -343,7 +366,13 @@ import MicroCore
             return ["target": row?.id.uuidString ?? "", "title": row?.title ?? "",
                     "active": row?.active ?? false, "state": lights[index].rawValue, "led": lights[index].agentCode]
         }
-        return ["slots": slots, "usb": deviceStatus, "cmux": profile.hasRecentSessions ? sessionStatus : (profile == .cmux ? cmuxStatus : profile.title), "feedback": feedback,
+        for i in slots.indices {
+            if let state = slots[i]["state"] as? String, let style = palette?.rules[state]?.slot {
+                slots[i]["lightColor"] = style.effect == 0 ? "transparent" : style.color
+            }
+        }
+        let lightStatus = device?.lightingStatus ?? ""
+        return ["lightingStatus": palette == nil ? "기기 기본 조명" : (lightStatus.isEmpty ? "저장됨 · USB 연결 대기" : lightStatus), "slots": slots, "usb": deviceStatus, "cmux": profile.hasRecentSessions ? sessionStatus : (profile == .cmux ? cmuxStatus : profile.title), "feedback": feedback,
                 "profile": profile.rawValue, "automatic":automatic,
                 "mappings": Dictionary(uniqueKeysWithValues: KeyMap.controls.map { ($0, binding($0, in:profile)) }),
                 "defaults": Dictionary(uniqueKeysWithValues: KeyMap.controls.map { ($0, profile.defaultBinding($0)) }), "busy": selecting || connecting]
@@ -355,6 +384,20 @@ import MicroCore
         do {
             switch r.method {
             case "state": result["value"] = state()
+            case "readLighting","saveLighting":
+                let current = palette ?? .initial
+                if r.method == "saveLighting" {
+                    guard let name = r.lightState, let rule = r.rule, current.rules[name] != nil else { throw CompanionError("알 수 없는 세션 상태입니다.") }
+                    var rules = current.rules
+                    rules[name] = rule
+                    let next = SessionLighting(rules:rules)
+                    guard next.valid else { throw CompanionError("조명 색상과 효과를 확인하세요.") }
+                    KeyMap.preferences.set(try JSONEncoder().encode(next),forKey:"sessionLighting")
+                    palette = next
+                    device?.retryLighting()
+                    updateLights()
+                }
+                result["value"] = try JSONSerialization.jsonObject(with:JSONEncoder().encode(palette ?? .initial))
             case "catalog":
                 result["value"] = ["profiles": AppProfile.allCases.map { ["id":$0.rawValue,"name":$0.title] }, "controls": KeyMap.controls.map { ["id": $0, "name": KeyMap.name($0), "action": KeyMap.label($0)] },
                                    "agentActions": Dictionary(uniqueKeysWithValues: AppProfile.allCases.map { ($0.rawValue,$0.agentActions) }), "slackActions": zip(SlackAction.inputs,SlackAction.labels).map { ["id":"slack."+$0.0,"name":$0.1] }, "modifiers": FunctionKey.modifiers, "special": FunctionKey.specialKeys] as [String: Any]

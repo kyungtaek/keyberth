@@ -138,6 +138,7 @@ function renderMapping() {
     b.title=title; b.setAttribute('aria-label',title);b.setAttribute('aria-pressed',String(id===selected));
     if (id.startsWith('K')) {
       const assigned = binding(id);
+      b.style.removeProperty('--session-color');
       const icon = actionIcons[assigned] || (byId.has(assigned) ? 'session' : 'shortcut');
       b.querySelector('img').setAttribute('src', 'assets/' + icon + '.svg');
       b.querySelector('.capLabel').textContent = actionText(assigned);
@@ -148,6 +149,7 @@ function renderMapping() {
           b.title+=' · '+slot.title+' · '+slot.state;
           b.setAttribute('aria-label',b.title);
           b.dataset.led=slot.led;
+          if(slot.lightColor)b.style.setProperty('--session-color',slot.lightColor);
         } else delete b.dataset.led;
       } else delete b.dataset.led;
       if (assigned.startsWith(notePrefix)) b.title += ' · '+assigned.slice(notePrefix.length);
@@ -196,10 +198,13 @@ function renderState(next) {
   $('usb').textContent=next.usb;$('cmux').textContent=next.cmux;
   $('usb').title=next.usb;$('cmux').title=next.cmux;
   $('connect').disabled=next.busy;
+  $('lightStatus').textContent=next.lightingStatus;
   for(const [i,s] of next.slots.entries()){
     const b=slotButtons[i];b.dataset.target=s.target;b.disabled=!s.target||next.busy;
     b.children[1].textContent=s.title||'빈 슬롯';b.children[2].textContent=s.state;b.children[2].dataset.led=s.led;
     b.title=s.title;
+    b.children[0].classList.toggle('coloredSlot',!!s.lightColor);
+    b.children[0].style.setProperty('--slot-dot',s.lightColor || 'transparent');
   }
   if(mappingsChanged) renderMapping();
 }
@@ -208,6 +213,49 @@ async function poll() {
   try {const next=await api('state');if(next.feedback && state?.feedback!==next.feedback)announce(next.feedback);renderState(next);}
   catch(e){$('usb').textContent='서비스 연결 실패';fail(e);}finally{polling=false;}
 }
+let lightRules;
+let savingLight = false;
+const lightDrafts = new Map();
+const lightInputs = {};
+const effects = ['끄기','고정','흐르기','무지개','숨쉬기','그라데이션','은은한 숨쉬기'];
+for(const [zone,title] of [['slot','슬롯 LED'],['ambient','바닥 조명']]) {
+  const row=group('lightRow'), label=document.createElement('strong');
+  const color=document.createElement('input'), effect=document.createElement('select');
+  label.textContent=title; color.type='color';
+  color.setAttribute('aria-label',title+' 색상'); effect.setAttribute('aria-label',title+' 애니메이션');
+  effects.forEach((text,i)=>effect.add(new Option(text,String(i))));
+  color.oninput=effect.onchange=()=>{
+    if(!lightRules)return;
+    const key=$('lightState').value;
+    const rule=lightDrafts.get(key) || structuredClone(lightRules[key]);
+    rule[zone]={color:color.value.toUpperCase(),effect:Number(effect.value)};
+    lightDrafts.set(key,rule); $('saveLight').disabled=savingLight;
+  };
+  lightInputs[zone]={color,effect};row.append(label,color,effect);$('lightZones').append(row);
+}
+function renderLights() {
+  const key=$('lightState').value, rule=lightDrafts.get(key) || lightRules[key];
+  for(const [zone,inputs] of Object.entries(lightInputs)){
+    inputs.color.value=rule[zone].color;inputs.effect.value=rule[zone].effect;
+  }
+  $('saveLight').disabled=savingLight;
+}
+async function loadLights(){
+  lightRules=(await api('readLighting')).rules;
+  $('lightState').replaceChildren(...Object.keys(lightRules).sort().map(name=>new Option(name,name)));
+  renderLights();
+}
+$('lightState').onchange=renderLights;
+$('saveLight').onclick=async()=>{
+  if(savingLight)return;
+  const key=$('lightState').value, rule=structuredClone(lightDrafts.get(key)||lightRules[key]);
+  savingLight=true;renderLights();
+  try {
+    lightRules=(await api('saveLighting',{lightState:key,rule})).rules;
+    if(JSON.stringify(lightDrafts.get(key))===JSON.stringify(rule))lightDrafts.delete(key);
+    announce('조명 설정을 이 Mac에 저장했습니다.');
+  } catch(e){fail(e);} finally{savingLight=false;renderLights();}
+};
 function updatePrefsButtons(){
   const n=$('sleep').valueAsNumber;
   $('sleep').disabled=$('volume').disabled=!prefs||prefsBusy;
@@ -233,6 +281,7 @@ function show(name){
     if(b.dataset.view===view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');
   }
   if(view==='device'&&!prefs)device(false);
+  if(view==='device'&&!lightRules)loadLights().catch(fail);
 }
 for(const b of document.querySelectorAll('[data-view]'))b.onclick=()=>show(b.dataset.view);
 $('openEditor').onclick=()=>popup?api('editor',{view:'mapping'}):show('mapping');
