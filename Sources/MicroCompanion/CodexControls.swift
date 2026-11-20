@@ -49,12 +49,13 @@ enum CodexControls {
     @MainActor static func startDictation() throws -> Dictation {
         let chord = try AssistantControls.codexChord("composer.toggleDictation",fallback:"cmd+shift+d")
         let win = try window()
-        guard let button = control(win, role:"AXButton", labels:["dictate","음성 입력"]) else {
+        guard control(win, role:"AXButton", labels:["dictate","음성 입력"]) != nil else {
             throw CompanionError("현재 Codex 작성창에서 받아쓰기를 시작할 수 없습니다.")
         }
-        guard click(button) else {
-            throw CompanionError("받아쓰기 버튼을 선택할 수 없습니다.")
-        }
+        try focusComposer(in:win)
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == AppProfile.codex.bundleIDs.first,
+              CFEqual(try window().element,win.element) else { throw CompanionError("Codex 작성창이 바뀌었습니다.") }
+        try DesktopShortcut.send(chord,to:.codex)
         return Dictation(window:win,stopChord:chord)
     }
 
@@ -76,8 +77,7 @@ enum CodexControls {
         }
     }
 
-    @MainActor static func submit() throws {
-        let win = try window()
+    private static func focusComposer(in win:AppNode) throws {
         let editors = win.descendants { node in node.role == "AXTextArea" && node.identifier.contains("prosemirror") }
         let main = editors.filter { $0.ancestors.contains { $0.identifier.contains("composerlayoutbody-") } }
         let candidates = main.isEmpty ? editors : main
@@ -85,6 +85,10 @@ enum CodexControls {
               AXUIElementSetAttributeValue(candidates[0].element,"AXFocused" as CFString,kCFBooleanTrue) == .success else {
             throw CompanionError("Codex 작성창을 선택할 수 없습니다.")
         }
+    }
+
+    @MainActor static func submit() throws {
+        try focusComposer(in:window())
         try DesktopShortcut.send("enter",to:.codex)
     }
 
