@@ -110,6 +110,9 @@ import MicroCore
     }
     private let cmuxSpace = CmuxSpace()
     private var micProfile: AppProfile?
+    private var t3Dictation: T3Controls.Dictation?
+    private var codexDictation: CodexControls.Dictation?
+    private var codexForkPending = false
     private var micKeys = Set<String>()
     private func finishMic() {
         cmuxSpace.cancel()
@@ -117,6 +120,16 @@ import MicroCore
         micProfile = nil
         micKeys.removeAll()
         do {
+            if let hold = t3Dictation {
+                t3Dictation = nil
+                try hold.finish()
+                return
+            }
+            if let hold = codexDictation {
+                codexDictation = nil
+                try CodexControls.endDictation(hold)
+                return
+            }
             try ClaudeControls.press(["stop dictation","finish dictation","starting dictation; click to cancel","받아쓰기 종료","받아쓰기 중지","받아쓰기 중단"],in:held)
         } catch { feedback = error.localizedDescription; hud(feedback) }
     }
@@ -239,7 +252,9 @@ import MicroCore
                 return sessions[index]?.url == selected
             }
         }
-        device?.display(states,selected:selectedKey,palette:slotPalette)
+        let palette = slotPalette
+        let breathing = profile == .codex ? (palette ?? .initial).breathingSlot(states:states,viewed:selectedKey) : nil
+        device?.display(states,selected:selectedKey,palette:palette,firmwareSlot:breathing)
     }
     private func recentIndex(_ value:String) -> Int? { (1...6).first { value == "recent."+String($0) }.map { $0-1 } }
     private var queue: [(DeckInput, CmuxTarget?, String?)] = []
@@ -281,9 +296,24 @@ import MicroCore
                     }
                 } else if binding.hasPrefix("agent."), profile.agentActions[binding] != nil {
                     if profile == .claudeCode { try ClaudeCodeHook.decide(binding == "agent.approve",for:selectedClaudeCode,requestID:selectedRequest) }
-                    else if profile == .t3 { performT3(binding) }
-                    else if binding == "agent.mic" {
-                        if micProfile == nil { try AssistantControls.perform(binding,in:profile); micProfile=profile }
+                    else if profile == .t3, binding == "agent.dictate" {
+                        if micProfile == nil { t3Dictation = try T3Controls.startDictation(); micProfile = .t3 }
+                        micKeys.insert(code)
+                    } else if profile == .t3 { performT3(binding) }
+                    else if profile == .codex, binding == "agent.fork" {
+                        guard !codexForkPending else { return }
+                        codexForkPending = true
+                        Task {
+                            defer { codexForkPending = false }
+                            do { try await CodexControls.fork() }
+                            catch { feedback = error.localizedDescription; hud(feedback) }
+                        }
+                    } else if binding == "agent.mic" {
+                        if micProfile == nil {
+                            if profile == .codex { codexDictation = try CodexControls.startDictation() }
+                            else { try AssistantControls.perform(binding,in:profile) }
+                            micProfile = profile
+                        }
                         micKeys.insert(code)
                     } else { try AssistantControls.perform(binding,in:profile) }
                 } else if profile == .obsidian, let path = ObsidianNote.path(binding) { try ObsidianNote.open(path) }

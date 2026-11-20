@@ -11,7 +11,7 @@ def configure(path):
     if not isinstance(entries, list) or not all(isinstance(row, dict) for row in entries):
         raise ValueError("Unrecognized Codex keybindings format")
     additions = []
-    for command, letter in [("composer.toggleFastMode", "F"), ("forkThread", "B"), ("composer.togglePlanMode", "P"), ("approval.approve", "Y"), ("approval.decline", "N")]:
+    for command, letter in [("composer.toggleFastMode", "F"), ("composer.togglePlanMode", "P"), ("approval.approve", "Y"), ("approval.decline", "N")]:
         if any(row.get("command") == command for row in entries):
             continue
         key = "Command+Control+Shift+" + letter

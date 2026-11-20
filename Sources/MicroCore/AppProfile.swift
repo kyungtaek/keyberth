@@ -78,7 +78,7 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
         } else {
             entries.merge(["agent.fast": self == .claude ? "모델 · 사고 수준 선택" : "Fast 모드 전환",
                            "agent.approve":"이번 요청 승인", "agent.decline":"요청 거절", "agent.fork":"대화 분기",
-                           "agent.mic":"마이크 받아쓰기", "agent.newChat":"새 대화", "agent.submit":"보내기", "agent.plan":self == .claude ? "계획 모드 선택" : "계획 모드 전환",
+                           "agent.mic":"누르고 받아쓰기", "agent.newChat":"새 대화", "agent.submit":"보내기", "agent.plan":self == .claude ? "계획 모드 선택" : "계획 모드 전환",
                            "agent.back":"이전 페이지", "agent.forward":"다음 페이지", "agent.sidebar":"사이드바 전환"]) { _, new in new }
         }
         if self == .codex { entries["agent.dots"] = "내 Dots 열기" }
@@ -89,7 +89,7 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
         ("JOY_DOWN","agent.terminal","터미널 열기/닫기"), ("JOY_RIGHT","agent.rightPanel","오른쪽 사이드 패널 열기/닫기"),
         ("K07","agent.nextPending","다음 입력 대기 세션"), ("K08","agent.approve","이번 요청 승인"),
         ("K09","agent.decline","요청 거부"), ("K10","agent.fork","현재 세션 포크"),
-        ("K11","agent.dictate","받아쓰기 시작 / 종료"), ("K12","agent.newChat","새 대화"), ("K13","agent.submit","보내기")
+        ("K11","agent.dictate","누르고 받아쓰기"), ("K12","agent.newChat","새 대화"), ("K13","agent.submit","보내기")
     ]
 
     public func defaultBinding(_ input: String) -> String {

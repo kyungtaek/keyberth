@@ -15,9 +15,14 @@ enum DesktopSessions {
               let location = web.url("AXURL") else { return nil }
         let route = (location.fragment ?? location.path).components(separatedBy:"?")[0]
         let parts = route.split(separator:"/")
-        guard parts.count >= 2, ["local","threads"].contains(String(parts[parts.count-2])),
-              let id = UUID(uuidString:String(parts.last!)) else { return nil }
-        return items.first { UUID(uuidString:$0.url.lastPathComponent) == id }?.url
+        if parts.count >= 2, ["local","threads"].contains(String(parts[parts.count-2])),
+           let id = UUID(uuidString:String(parts.last!)) {
+            return items.first { UUID(uuidString:$0.url.lastPathComponent) == id }?.url
+        }
+        // Some desktop versions expose the shell URL and the chat title separately.
+        let title = ClaudeControls.label(web)
+        let matches = items.filter { !$0.title.isEmpty && $0.title == title }
+        return matches.count == 1 ? matches[0].url : nil
     }
     static func read(_ profile: AppProfile, pendingT3Only: Bool = false) throws -> [DesktopSession] {
         if profile == .claude { return try ClaudeControls.sessions() }
@@ -54,6 +59,7 @@ enum DesktopSessions {
         guard !data.isEmpty else { return [] }
         struct Row: Decodable { let id: String; let title, rollout_path, status, revision: String? }
         let rows = try JSONDecoder().decode([Row].self, from:data)
+        let turns = codex ? latestCodexTurns(rows.compactMap { UUID(uuidString:$0.id) }, home:home) : [:]
         var environment = "", version = ""
         if !codex {
             environment = try String(contentsOf:db.deletingLastPathComponent().appendingPathComponent("environment-id")).trimmingCharacters(in:.whitespacesAndNewlines)
@@ -66,9 +72,34 @@ enum DesktopSessions {
                 T3Navigation.url(installedVersion:version,target:Key(environment:environment,thread:row.id))
             guard let url else { return nil }
             let states: [String:SessionLight] = ["attention":.attention,"running":.running,"completed":.done,"settled":.empty,"stopped":.empty,"interrupted":.ready,"cancelled":.empty]
-            let (light,revision) = codex ? rolloutState(row.rollout_path) : (states[row.status ?? ""] ?? .unknown,row.revision)
+            let (light,revision) = codex ? (turns[row.id.lowercased()] ?? rolloutState(row.rollout_path)) : (states[row.status ?? ""] ?? .unknown,row.revision)
             return DesktopSession(url:url,title:row.title ?? row.id,light:light,completionRevision:revision)
         }
+    }
+
+    static func latestCodexTurns(_ ids:[UUID], home:URL) -> [String:(SessionLight,String?)] {
+        guard !ids.isEmpty else { return [:] }
+        let db = home.appendingPathComponent(".codex/thread_history_1.sqlite")
+        let values = ids.map { "('" + $0.uuidString.lowercased() + "')" }.joined(separator:",")
+        let sql = """
+            WITH slots(id) AS (VALUES \(values))
+            SELECT t.thread_id,t.turn_id,t.status FROM slots
+            JOIN thread_turns t ON t.thread_id=slots.id AND t.turn_id=(
+            SELECT turn_id FROM thread_turns WHERE thread_id=slots.id ORDER BY rollout_ordinal DESC LIMIT 1)
+            """
+        struct Turn: Decodable { let thread_id,turn_id,status:String }
+        guard let data = try? CmuxClient.run(["-readonly","-json",db.path,sql],executable:"/usr/bin/sqlite3"),
+              let turns = try? JSONDecoder().decode([Turn].self,from:data) else { return [:] }
+        var result = [String:(SessionLight,String?)]()
+        for turn in turns {
+            switch turn.status {
+            case "inProgress": result[turn.thread_id] = (.running,nil)
+            case "completed": result[turn.thread_id] = (.done,turn.turn_id)
+            case "interrupted","failed": result[turn.thread_id] = (.ready,nil)
+            default: continue
+            }
+        }
+        return result
     }
 
     private static func rolloutState(_ path: String?) -> (SessionLight,String?) {

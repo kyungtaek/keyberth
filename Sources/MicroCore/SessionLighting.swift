@@ -46,12 +46,19 @@ public struct SessionLighting: Codable, Equatable {
         return Self(rules:updated)
     }
 
-    public func commands(states:[SessionLight], selected:Int?, firstID:Int) throws -> [[[UInt8]]] {
+    public func breathingSlot(states:[SessionLight], viewed:Int?) -> Int? {
+        guard rules[SessionLight.running.rawValue]?.slot == Self.initial.rules[SessionLight.running.rawValue]?.slot else { return nil }
+        if let viewed, states.indices.contains(viewed), states[viewed] == .running { return viewed }
+        return states.firstIndex(of:.running)
+    }
+
+    public func commands(states:[SessionLight], selected:Int?, firstID:Int, firmwareSlot:Int? = nil) throws -> [[[UInt8]]] {
         guard valid, states.count == 6 else { throw LED.Invalid.colors }
         let priority: [SessionLight] = [.attention,.running,.done,.active,.ready,.unknown,.empty]
         let focus = selected.flatMap { states.indices.contains($0) && states[$0] != .empty ? states[$0] : nil }
         let ambient = focus ?? priority.first(where:states.contains) ?? .empty
-        let slots = states.enumerated().map { index, state -> [String:Any] in
+        let slots = states.enumerated().compactMap { index, state -> [String:Any]? in
+            guard index != firmwareSlot else { return nil }
             var item = rules[state.rawValue]!.slot.fields
             item["id"] = index
             return item

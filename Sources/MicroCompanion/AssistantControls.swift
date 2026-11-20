@@ -99,13 +99,15 @@ enum AssistantControls {
         case "agent.newChat":
             let chord = codex ? try codexChord("newTask",fallback:"cmd+n") : "cmd+n"
             try DesktopShortcut.send(chord,to:profile)
-        case "agent.submit": try DesktopShortcut.send("enter",to:profile)
+        case "agent.submit":
+            if codex { try CodexControls.submit() }
+            else { try DesktopShortcut.send("enter",to:profile) }
         case "agent.back","agent.forward": try DesktopShortcut.send(action == "agent.back" ? "cmd+[" : "cmd+]",to:profile)
         case "agent.fast","agent.fork","agent.plan","agent.sidebar","agent.mic":
             if codex {
-                let commands = ["agent.fast":"composer.toggleFastMode","agent.fork":"forkThread","agent.plan":"composer.togglePlanMode","agent.sidebar":"toggleSidebar","agent.mic":"composer.toggleDictation"]
-                let defaults = ["agent.sidebar":"cmd+b","agent.mic":"cmd+shift+d"]
-                try DesktopShortcut.send(codexChord(commands[action]!,fallback:defaults[action]),to:profile)
+                let commands = ["agent.fast":"composer.toggleFastMode","agent.plan":"composer.togglePlanMode","agent.sidebar":"toggleSidebar"]
+                guard let command = commands[action] else { throw CompanionError("Codex 대화 컨트롤을 확인하세요.") }
+                try DesktopShortcut.send(codexChord(command,fallback:action == "agent.sidebar" ? "cmd+b" : nil),to:profile)
             } else {
                 let labels = ["agent.fast":["select model","choose model","model selector","모델 선택"],
                               "agent.fork":["branch conversation","branch from here","fork conversation","대화 분기","여기에서 분기"],

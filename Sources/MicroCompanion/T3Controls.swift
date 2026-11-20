@@ -1,4 +1,5 @@
 import AppKit
+import CoreAudio
 import MicroCore
 
 @MainActor enum T3Controls {
@@ -60,6 +61,70 @@ import MicroCore
         return value
     }
 
+    struct Dictation {
+        let root:AppNode
+        let editor:AppNode
+        let started = ProcessInfo.processInfo.systemUptime
+
+        func finish() throws {
+            // Escape sent before DictationIM opens the microphone is consumed by Electron.
+            // Poll only during startup. Read the system capture state, never the audio.
+            let now = ProcessInfo.processInfo
+            if #available(macOS 14.2, *) {
+                while now.systemUptime < started + 1.5 && !Self.speechInputActive() { Thread.sleep(forTimeInterval:0.025) }
+            } else if now.systemUptime < started + 0.7 {
+                Thread.sleep(forTimeInterval:started + 0.7 - now.systemUptime)
+            }
+            guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == AppProfile.t3.bundleIDs.first,
+                  let focus = root.node("AXFocusedUIElement"), CFEqual(focus.element,editor.element) else {
+                throw CompanionError("T3 작성창의 포커스가 바뀌었습니다. 받아쓰기 상태를 확인하세요.")
+            }
+            // Dictation runs in the system input method, before events reach T3.
+            guard let down = CGEvent(keyboardEventSource:nil,virtualKey:53,keyDown:true),
+                  let up = CGEvent(keyboardEventSource:nil,virtualKey:53,keyDown:false) else {
+                throw CompanionError("받아쓰기 종료 키를 만들 수 없습니다.")
+            }
+            down.flags = []
+            up.flags = []
+            down.post(tap:.cghidEventTap)
+            up.post(tap:.cghidEventTap)
+        }
+
+        @available(macOS 14.2, *)
+        private static func speechInputActive() -> Bool {
+            func address(_ selector:AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+                .init(mSelector:selector,mScope:kAudioObjectPropertyScopeGlobal,mElement:kAudioObjectPropertyElementMain)
+            }
+            var list = address(kAudioHardwarePropertyProcessObjectList), size:UInt32 = 0
+            guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject),&list,0,nil,&size) == noErr, size > 0 else { return false }
+            var ids = [AudioObjectID](repeating:0,count:Int(size)/MemoryLayout<AudioObjectID>.size)
+            guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),&list,0,nil,&size,&ids) == noErr else { return false }
+            return ids.contains { id in
+                var active:UInt32 = 0, bytes = UInt32(MemoryLayout<UInt32>.size)
+                var input = address(kAudioProcessPropertyIsRunningInput)
+                guard AudioObjectGetPropertyData(id,&input,0,nil,&bytes,&active) == noErr, active != 0 else { return false }
+                var pid:pid_t = 0, prop = address(kAudioProcessPropertyPID)
+                guard AudioObjectGetPropertyData(id,&prop,0,nil,&bytes,&pid) == noErr else { return false }
+                var name = [CChar](repeating:0,count:256)
+                return proc_name(pid,&name,UInt32(name.count)) > 0 && String(cString:name) == "corespeechd"
+            }
+        }
+    }
+
+    static func startDictation() throws -> Dictation {
+        let ctx = try Context()
+        ctx.app.activate(options:[])
+        try ctx.focusComposer()
+        guard let editor = ctx.root.node("AXFocusedUIElement") else { throw CompanionError("T3 작성창을 확인하세요.") }
+        let labels = ["Start Dictation…","Start Dictation","받아쓰기 시작…","받아쓰기 시작"]
+        let items = ctx.root.node("AXMenuBar")?.descendants {
+            $0.role == "AXMenuItem" && labels.contains(ClaudeControls.label($0)) && $0.attr("AXEnabled") as? Bool != false
+        } ?? []
+        guard items.count == 1 else { throw CompanionError("macOS 키보드 설정에서 받아쓰기를 확인하세요.") }
+        try items[0].press()
+        return Dictation(root:ctx.root,editor:editor)
+    }
+
     static func perform(_ action:String, stillActive:()->Bool) async throws {
         switch action {
         case "agent.terminal","agent.rightPanel":
@@ -113,14 +178,6 @@ import MicroCore
             }
             guard let fork=ctx.buttons(["Fork from this response"]).last else { throw CompanionError("포크할 수 있는 응답이 없습니다.") }
             try fork.press()
-        case "agent.dictate":
-            let ctx=try Context()
-            ctx.app.activate(options:[])
-            try ctx.focusComposer()
-            let labels=["Start Dictation…","Start Dictation","Stop Dictation","받아쓰기 시작…","받아쓰기 시작","받아쓰기 중단","받아쓰기 중지"]
-            let items=ctx.root.node("AXMenuBar")?.descendants { $0.role == "AXMenuItem" && labels.contains(ClaudeControls.label($0)) && $0.attr("AXEnabled") as? Bool != false } ?? []
-            guard items.count == 1 else { throw CompanionError("macOS 키보드 설정에서 받아쓰기를 확인하세요.") }
-            try items[0].press()
         case "agent.submit":
             let buttons=try Context().buttons(["Submit message","Queue message","Steer message","Compact and send","Update queued message"])
             guard buttons.count == 1 else { throw CompanionError("보낼 수 있는 T3 메시지가 없습니다.") }

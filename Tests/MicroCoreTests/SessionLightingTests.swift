@@ -37,4 +37,18 @@ final class SessionLightingTests: XCTestCase {
         XCTAssertFalse(SessionLighting(rules:[:]).valid)
         XCTAssertThrowsError(try SessionLighting.initial.commands(states:[],selected:nil,firstID:1))
     }
+
+    func testFirmwareOwnsOneRunningSlotWhileOtherColorsAreWritten() throws {
+        let states: [SessionLight] = [.running,.ready,.running,.empty,.empty,.empty]
+        let palette = SessionLighting.initial
+        XCTAssertEqual(palette.breathingSlot(states:states,viewed:2),2)
+        XCTAssertEqual(palette.breathingSlot(states:states,viewed:1),0)
+        XCTAssertNil(palette.breathingSlot(states:[.ready],viewed:nil))
+        let packets = try palette.commands(states:states,selected:2,firstID:1,firmwareSlot:2)[0]
+        var input = Readback()
+        let data = try XCTUnwrap(try packets.compactMap { try input.accept(id:6,bytes:$0) }.first)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with:data) as? [String:Any])
+        let slots = try XCTUnwrap(object["params"] as? [[String:Any]])
+        XCTAssertEqual(slots.compactMap { $0["id"] as? Int },[0,1,3,4,5])
+    }
 }

@@ -169,11 +169,11 @@ final class AgentHID {
         RunLoop.main.add(timer, forMode: .common)
         tick()
     }
-    func display(_ states: [SessionLight], selected index: Int?, palette:SessionLighting? = nil) {
+    func display(_ states: [SessionLight], selected index: Int?, palette:SessionLighting? = nil, firmwareSlot:Int? = nil) {
         guard states.count == 6 else { return }
-        wantedLighting = LightingOutput.Frame(palette:palette ?? .initial,states:states,selected:index,includeAmbient:palette != nil)
+        wantedLighting = LightingOutput.Frame(palette:palette ?? .initial,states:states,selected:index,includeAmbient:palette != nil,firmwareSlot:firmwareSlot)
         frame = states.map(\.agentCode).joined()
-        selected = String(index.map { $0 + 1 } ?? 0)
+        selected = String((firmwareSlot ?? index).map { $0 + 1 } ?? 0)
     }
     private func write(_ line: String) throws {
         for part in try UniversalAgent.frames(line) {

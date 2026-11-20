@@ -10,6 +10,7 @@ final class LightingOutput {
         let states: [SessionLight]
         let selected: Int?
         let includeAmbient: Bool
+        var firmwareSlot:Int? = nil
     }
     private var decoder = Readback()
     private var waiting = 0
@@ -41,7 +42,7 @@ final class LightingOutput {
             buffer.deallocate()
         }
         let firstID=Int.random(in:1...1_000_000_000)
-        let commands=try frame.palette.commands(states:frame.states,selected:frame.selected,firstID:firstID)
+        let commands=try frame.palette.commands(states:frame.states,selected:frame.selected,firstID:firstID,firmwareSlot:frame.firmwareSlot)
         for (index, packets) in commands.prefix(frame.includeAmbient ? 2 : 1).enumerated() {
             receiver.waiting=firstID+index
             receiver.accepted=nil
