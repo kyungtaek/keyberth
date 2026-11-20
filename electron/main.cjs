@@ -115,6 +115,16 @@ function showPopup() {
 }
 ipcMain.handle('command', async (event, method, data) => {
   if (fileURLToPath(event.senderFrame.url) !== page) throw new Error('Unknown window');
+  if (['addProfile','removeProfile'].includes(method)) {
+    if (!editor || event.sender!==editor.webContents) throw Error('편집 창에서 키맵을 관리하세요.');
+    if (method==='removeProfile') {
+      const choice=await dialog.showMessageBox(editor,{message:'선택한 앱의 키맵을 삭제할까요?',detail:'저장된 키 배정도 삭제됩니다.',buttons:['취소','삭제'],cancelId:0,defaultId:0});
+      return choice.response===1 ? request(method,{profile:data.profile}) : null;
+    }
+    if (data?.profile) return request(method,{profile:data.profile});
+    const pick=await dialog.showOpenDialog(editor,{title:'키맵을 추가할 앱 선택',defaultPath:'/Applications',properties:['openFile'],filters:[{name:'macOS 앱',extensions:['app']}]});
+    return pick.canceled ? null : request(method,{target:pick.filePaths[0]});
+  }
   if ((method==='installClaudeHooks'||method==='removeClaudeHooks') && editor && event.sender===editor.webContents) {
     await require('./claude-hooks.cjs').configure(helper,method==='installClaudeHooks');
     return true;

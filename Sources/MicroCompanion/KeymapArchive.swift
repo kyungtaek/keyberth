@@ -28,7 +28,7 @@ struct KeymapArchive: Codable {
     func validate() throws {
         guard version == 1, !profiles.isEmpty, claudeSlots.map({ $0.valid && profiles["claudeCode"] != nil }) ?? true else { throw CompanionError("지원하지 않는 키맵 파일입니다.") }
         for (id,overrides) in profiles {
-            guard let profile = AppProfile(rawValue:id) else { throw CompanionError("알 수 없는 프로필 · "+id) }
+            guard let profile = AppProfile(rawValue:id), profile != .unconfigured else { throw CompanionError("알 수 없는 프로필 · "+id) }
             for (key,value) in overrides where !Self.accepts(value,input:key,profile:profile) {
                 throw CompanionError("잘못된 키 매핑 · "+id+" / "+key)
             }

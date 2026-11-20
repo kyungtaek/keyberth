@@ -66,7 +66,7 @@ function createKey(id, icon) {
   return b;
 }
 function build() {
-  for (const profile of catalog.profiles) $('profile').add(new Option(profile.name,profile.id));
+
   for (const item of catalog.controls) byId.set(item.id, item);
   const dial = group('dial'), joy = group('joy');
   dial.append(createKey('ENC_PRESS'),createKey('ENC_CCW','ccw'),createKey('ENC_CW','cw'));
@@ -160,7 +160,7 @@ function renderMapping() {
   }
   $('keyTitle').textContent=selected.startsWith('K')?Number(selected.slice(1))+'번 키':byId.get(selected).name;
   $('keyId').textContent=selected;$('current').textContent=actionText(saved);
-  const locked = !!fixed[selected], desktop = state.profile !== 'cmux';
+  const locked = state.profile==='unconfigured' || !!fixed[selected], desktop = state.profile !== 'cmux';
   $('actionMode').parentElement.hidden=locked;
   $('current').textContent=locked ? (fixed[selected] || actionText(saved)) : actionText(saved);
   $('noteMode').hidden=!(state.profile==='obsidian' && /^K0[1-6]$/.test(selected));
@@ -226,7 +226,15 @@ function renderState(next) {
   renderClaudeOptions(next);
   const mappingsChanged = !state || JSON.stringify(next.slots)!==JSON.stringify(state.slots) || next.profile!==state.profile || JSON.stringify(state.mappings) !== JSON.stringify(next.mappings);
   if(state?.profile!==next.profile) {categoryOverride='';buildFunctions(next.profile);}
-  state=next; $('profile').value=next.profile; $('activeName').textContent=catalog.profiles.find(p=>p.id===next.profile).name;
+  if (!state || JSON.stringify(state.profiles)!==JSON.stringify(next.profiles)) {
+    $('profile').replaceChildren(...next.profiles.map(p=>new Option(p.name,p.id)));
+    const present=new Set(next.profiles.map(p=>p.id));
+    $('manageProfile').replaceChildren(new Option('응용 프로그램 선택…',''),...next.profiles.map(p=>new Option(p.name,p.id)),
+      ...catalog.templates.filter(p=>!present.has(p.id)).map(p=>new Option(p.name+' (추가 가능)',p.id)));
+    $('manageProfile').value=next.profiles.find(p=>p.id===next.profile)?.id || '';
+  }
+  state=next; $('profile').value=next.profile; $('activeName').textContent=next.profiles.find(p=>p.id===next.profile)?.name || '키맵 없음';
+  $('manageProfile').onchange();
   $('auto').textContent='자동 전환 '+(next.automatic?'켬':'끔'); $('auto').setAttribute('aria-pressed',String(next.automatic));
   $('usb').textContent=next.usb;$('cmux').textContent=next.cmux;
   $('usb').title=next.usb;$('cmux').title=next.cmux;
@@ -234,7 +242,7 @@ function renderState(next) {
   $('lightStatus').textContent=next.lightingStatus;
   for(const [i,s] of next.slots.entries()){
     const b=slotButtons[i];b.dataset.target=s.target;b.disabled=!s.target||next.busy;
-    b.children[1].textContent=s.title||'빈 슬롯';b.children[2].textContent=s.state;b.children[2].dataset.led=s.led;
+    b.children[1].textContent=s.title||'빈 슬롯';b.children[2].textContent=s.active?'선택됨 · '+s.state:s.state;b.children[2].dataset.led=s.led;
     b.title=s.title;
     b.children[0].classList.toggle('coloredSlot',!!s.lightColor);
     b.children[0].style.setProperty('--slot-dot',s.lightColor || 'transparent');
@@ -353,3 +361,15 @@ for(const action of ['importMaps','exportMaps']) {
 }
 window.keyberth.onView(show);
 (async()=>{catalog=await api('catalog');build();await poll();show(view);setInterval(()=>{if(!document.hidden)poll();},900);document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});})().catch(fail);
+
+$('manageProfile').onchange=()=>{
+  const present=state?.profiles.some(p=>p.id===$('manageProfile').value);
+  $('addProfile').disabled=!!present;
+  $('removeProfile').disabled=!present;
+};
+for(const method of ['addProfile','removeProfile']) $(method).onclick=async()=>{
+  try {
+    const result=await api(method,{profile:$('manageProfile').value});
+    if(result){drafts.clear();renderState(result);renderMapping();}
+  }catch(error){fail(error);}
+};

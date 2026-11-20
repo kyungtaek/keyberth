@@ -1,74 +1,56 @@
-# Keyberth
+# Keyberth 사용자 가이드
 
-Electron 기반 macOS 앱입니다. 키 매핑·최근 세션·기기 설정은 HTML/CSS로 표시하며, Swift 브리지가 USB HID·시리얼 통신과 cmux 명령 실행을 맡습니다. 개발 실행은 Node.js 22.12 이상과 Swift 환경에서 `npm ci && npm start`를 사용합니다. 기존 Mac 사용자 설정의 키 배정과 최근 세션을 그대로 읽습니다.
+Keyberth는 AI Micro 키패드로 Mac의 대화와 터미널을 제어하는 메뉴 막대 앱입니다. 노브로 앱을 고르고 1–6번 키로 최근 세션을 엽니다. 키에 들어오는 조명을 보면 어떤 세션이 실행 중이고 어디에 입력이 필요한지 알 수 있습니다.
 
-macOS 메뉴 막대에서 USB로 연결한 Universal Agent 0.2.18의 여섯 세션 키를 cmux 터미널에 연결합니다. cmux가 내부 프로세스의 소켓 접근만 허용하는 환경에서는 **cmux 터미널 안에서** 아래 실행 파일을 시작합니다. 터미널을 열어 두세요.
+## 처음 사용하기
 
-```sh
-bash scripts/package.sh
-./dist/MicroCompanion.app/Contents/MacOS/MicroCompanion
-```
+1. Apple Silicon Mac에서 최신 릴리스의 **macOS-arm64.dmg**를 다운로드합니다. [최신 버전 다운로드](https://github.com/kyungtaek/keyberth/releases/latest)
+2. DMG를 열고 **Keyberth**를 **Applications(응용 프로그램)** 폴더로 드래그한 뒤, 응용 프로그램 폴더에서 실행합니다.
+3. 권한 안내가 뜨면 **시스템 설정 열기**를 누릅니다. **개인정보 보호 및 보안 → 손쉬운 사용**에서 Keyberth를 켜고 앱으로 돌아와 **다시 확인**을 누릅니다.
+4. **Universal Agent 0.2.18** 펌웨어가 설치된 AI Micro를 USB로 연결합니다. Keyberth 창 하단에서 USB 연결 상태를 확인합니다.
+5. 사용할 앱을 열고 노브를 돌려 해당 키맵을 선택합니다. 예를 들어 cmux 터미널을 두 개 연 뒤 메뉴 막대의 키보드 아이콘을 클릭하면 최근 세션 목록이 뜹니다. 목록에 표시된 번호를 기기에서 누르면 그 터미널로 이동합니다.
 
-실행 명령 끝에 `--show-slots`를 붙이면 같은 여섯 버튼을 일반 창에서도 사용할 수 있습니다.
+## 키맵 선택과 편집
 
-메뉴 막대 키보드 아이콘에서 연결 상태와 슬롯을 확인할 수 있습니다. 1–6번은 최근 활성화된 터미널 순서이며 1번이 가장 최근입니다. 관찰한 세션이 여섯 개 미만이면 현재 열린 터미널로 채웁니다. 종료한 세션은 목록에서 빠집니다. 다른 앱을 사용하는 중에 세션 키를 누르면 cmux가 전면으로 오면서 해당 터미널을 선택합니다. USB 재연결은 메뉴의 **다시 연결**을 사용합니다.
+- **노브 회전**으로 등록한 앱 키맵을 앞뒤로 순회합니다. **노브 클릭**으로 포커스 기반 자동 전환을 켜거나 끕니다. 현재 선택은 화면 하단의 HUD에서 확인합니다.
+- **메뉴 막대 아이콘 우클릭 → 키 매핑**을 엽니다. 앱을 고르고 키보드 그림에서 바꿀 키나 방향을 클릭합니다. 기능을 고르거나 **단축키**에서 ⌘·⌃·⌥·⇧와 기본 키를 조합한 뒤 **저장**을 누릅니다. 노브는 키맵 전환용으로 고정됩니다.
+- **기기 설정 → 앱 키맵**에서 내장 프로필을 추가하거나 Mac에 설치된 응용 프로그램을 선택해 단축키를 배정할 수 있습니다. 삭제하면 해당 앱의 키 배정도 지워집니다.
+- **기기 설정 → 키맵 파일 → JSON 내보내기**로 배정을 백업합니다. 다른 Mac에서는 **JSON 가져오기**를 선택합니다. 파일에 포함된 앱의 배정이 적용됩니다.
 
-앱은 USB 시리얼에서 제조사의 `UPDATE_INFO`로 기종과 버전을 확인하고, 같은 USB 위치의 Universal Agent HID(usage page FF31, usage 1, report 7)에서 세션을 엽니다. AMHELLO로 펌웨어와 기능을 확인하고 AMMODE와 AMKEYMODE를 설정합니다. AMINPUT이 키 입력을 전달하고, AMFRAME과 AMSELECT가 슬롯 상태 및 선택을 기기에 전달합니다. 세션 중에는 AMHEARTBEAT를 보냅니다. 실행 파일에 `--check-device`를 붙이면 CDC 버전과 HID 세션 연결을 확인하고 종료합니다. 이미 실행 중인 컴패니언은 이 검사 전에 종료하세요. 빌드는 `bash scripts/package.sh`, 단위 테스트는 `swift test`입니다. SwiftPM 중첩 샌드박스를 지원하지 않는 실행기에서는 `--disable-sandbox`를 덧붙입니다.
+## 기본 키로 무엇을 할 수 있나요?
 
-## 키 매핑
+| 키 | cmux | T3 Code 0.1.7 | Codex Desktop |
+| --- | --- | --- | --- |
+| 1–6 | 최근 터미널 열기 | 최근 세션 열기 | 최근 대화 열기 |
+| 방향키 | 상하좌우 이웃 패널로 포커스 이동 | 아래 터미널 전환 · 오른쪽 사이드 패널 전환 | 위 계획 모드 · 아래 사이드바 · 좌우 이전/다음 페이지 |
+| 7 | 새 워크스페이스 | 다음 입력 대기 세션 | ChatGPT의 내 Dots 열기 |
+| 8 / 9 | 현재 대화의 Feed 요청 승인 / 거부 | 현재 요청 승인 / 거부 | 현재 요청 승인 / 거부 |
+| 10 | 오른쪽 사이드 패널 열기 | 현재 대화 포크 | 현재 대화 포크 |
+| 11 | 스페이스, 길게 누르면 반복 | macOS 받아쓰기 시작 / 종료 | 누르고 말하기 |
+| 12 | 오른쪽 분할에서 대화 포크 | 새 대화 | **새 대화** |
+| 13 | Enter | 보내기 | 보내기 |
 
-입력 ID와 기본 동작, 매핑 저장 방식, 다른 앱을 연결하는 절차는 [키 매핑과 앱 연동 가이드](docs/key-mapping.md)에 정리했습니다. 키보드 일러스트는 [제조사 제품 페이지](https://micro.diyshare.cn/)의 기기 배치를 참고해 제작했습니다.
+**cmux**는 다른 앱을 사용 중이어도 세션 키를 누르면 해당 터미널을 전면에 열고 선택한 분할 패널을 잠깐 강조합니다. 8·9번은 현재 대화의 대기 요청을 한 건으로 식별할 수 있을 때 동작합니다.
 
-## 기능 키와 상태 LED
+**T3 Code**에서 11번은 한 번 누르면 받아쓰기를 시작하고 다시 누르면 종료합니다. 먼저 **시스템 설정 → 키보드 → 받아쓰기**를 켜세요.
 
-| 컨트롤 | 기본 동작 |
+**Codex Desktop**의 포크와 계획 모드는 Codex에 해당 명령의 단축키가 지정돼 있어야 합니다. 12번을 이전에 직접 변경했다면 **키 매핑 → 12번 → 기본값 복원 → 저장**으로 새 대화를 배정할 수 있습니다.
+
+**Claude Desktop**과 **Claude Code**도 내장 프로필에서 선택할 수 있습니다. Claude Code 슬롯과 권한 요청을 연결하려면 **기기 설정 → Claude Code 세션 훅 → 연결**을 누른 뒤 새 Claude Code 세션을 시작하세요. [Claude 키 배정 및 세션 설정](docs/key-mapping.md#codex와-claude)
+
+## LED와 기기 설정
+
+기본 슬롯 색은 **흰색이 유휴**, **파란색이 실행 중**, **주황색이 입력 대기**, **초록색이 아직 열어보지 않은 새 완료**입니다. T3에서 정리한 세션은 번호로 다시 열 수 있지만 LED는 꺼집니다.
+
+**기기 설정 → 세션 조명**에서 상태를 선택하고 슬롯 LED와 바닥 조명의 색·애니메이션을 각각 고른 뒤 **조명 저장**을 누릅니다. 같은 기기 설정 화면에서 자동 절전 시간과 부저 볼륨도 조정할 수 있습니다.
+
+## 연결과 업데이트
+
+| 증상 | 확인할 곳 |
 | --- | --- |
-| 노브 반시계 / 시계 | 이전 / 다음 앱 키맵 (고정) |
-| 노브 클릭 | 포커스 기반 자동 전환 켬 / 끔 (전역) |
-| 방향키 | 같은 작업공간에서 해당 방향의 이웃 패널로 이동 |
-| 1–6 | 최근 세션 선택 |
-| 7 | 현재 창에 새 워크스페이스 생성 |
-| 8 / 9 | 현재 대화에 연결된 cmux Feed 권한 요청 한 건을 한 번 승인 / 거부 |
-| 10 | 오른쪽 사이드 패널 열기 |
-| 11 | 활성 터미널에 스페이스 |
-| 12 | 현재 터미널의 저장된 대화를 오른쪽 분할에서 포크 |
-| 13 | 활성 터미널에 엔터 |
+| USB가 연결되지 않음 | 기기의 USB 유선 모드와 펌웨어 버전을 확인한 뒤 **다시 연결**을 누릅니다. |
+| 앱에 단축키가 전달되지 않음 | 대상 앱을 열고 올바른 키맵이 선택됐는지 확인합니다. 메뉴 막대 아이콘 우클릭 → **권한 안내…**에서 손쉬운 사용 권한을 다시 확인합니다. |
+| cmux에 ‘내부에서 시작된 프로세스만 연결할 수 있습니다’가 표시됨 | cmux의 소켓 제어 모드를 확인합니다. 내부 프로세스 전용 설정을 유지하려면 Keyberth를 종료하고 cmux 터미널에서 `/Applications/Keyberth.app/Contents/MacOS/MicroCompanion`을 실행한 뒤 터미널을 열어 둡니다. |
+| 새 버전을 설치하고 싶음 | 응용 프로그램 폴더에 설치한 Keyberth는 자동으로 업데이트를 확인합니다. 바로 확인하려면 메뉴 막대 아이콘 우클릭 → **업데이트 확인…**을 선택합니다. 0.3.0 사용자는 최신 DMG로 한 번 수동 설치해야 합니다. |
 
-앱 키맵은 cmux → Slack → Obsidian → T3 Code → Claude Desktop → Codex 일반 단축키 → Claude Code 세션 순서로 순환합니다. 노브 회전은 키맵 전환, 클릭은 자동 전환에 고정되며 변경 사항이 HUD에 잠깐 표시됩니다. 자동 전환의 초기값은 끔입니다. 켜면 지원 앱이 전면으로 올 때 그 앱의 키맵이 활성화됩니다. 다른 앱의 포커스는 마지막 키맵을 유지합니다. 터치는 전환에 사용하지 않습니다. cmux 이외의 키맵은 실행 중인 대상 앱에 macOS 키 입력을 보내며, macOS 손쉬운 사용 권한이 필요할 수 있습니다.
-
-**키 매핑**에서 키보드 일러스트의 번호 키와 방향키를 선택해 cmux 동작 또는 터미널 단축키를 배정합니다. **저장**하면 적용되고 **기본값 복원**으로 선택한 컨트롤의 기본 동작을 되살릴 수 있습니다. 8·9번은 대상 요청을 특정할 수 있을 때 동작하고, 12번은 실행 중인 Codex의 경우 패널 TTY의 전경 프로세스가 쓰는 대화 기록에서 ID를 확인하고 cmux 복원 ID를 자동 등록·교정합니다. 자식 패널에서 다시 누르면 그 자식의 대화를 포크합니다. 다른 제공자는 cmux의 저장된 포크 명령을 사용합니다.
-
-| 앱 표시등 | 의미 |
-| --- | --- |
-| 주황 | cmux가 작업공간 에이전트의 입력 요청을 보고함 |
-| 하늘색 | 작업공간에 실행 중인 에이전트가 있음 |
-| 보라 | 작업공간의 유효 상태가 완료(done) |
-| 초록 | 현재 터미널 |
-| 청회색 | 대기 |
-| 회갈색 | 작업공간 상태 조회 실패 |
-| 꺼짐 | 빈 슬롯 또는 연결 끊김 |
-
-입력 요청, 실행, 완료 순서로 우선 표시합니다. 이 세 상태는 cmux의 `workspace status` 신호이므로 같은 작업공간의 슬롯에 함께 반영됩니다. 실기기 0.2.18에서는 선택한 5번 슬롯이 흰색으로 점멸했고, 작업공간 실행 중에는 파란색, 입력 대기에는 붉은색, 완료에는 초록색으로 점멸했습니다. 터미널별 포커스는 별도로 추적합니다. 실기기의 색과 점멸은 펌웨어가 슬롯 상태 코드와 선택 슬롯에 따라 표시합니다.
-
-메뉴 막대 아이콘의 클릭과 macOS 접근성 동작 **슬롯 팝오버 열기**는 같은 네이티브 팝오버를 엽니다. 창 단위로만 탐색하는 접근성 도구는 `--show-slots`로 연 창에서 실제 상태 버튼에 접근할 수 있습니다.
-
-이전 구현은 가상 T3 세션 여섯 개를 표시하는 데모, Basic 0.1.0 전용 USB 조회 코드, T3 0.1.7 경로 생성기로 구성되어 있었습니다. 아래는 그 시점의 기록입니다.
-
-## Historical T3 prototype (superseded)
-- The USB candidate button only enumerates macOS HID registry metadata (USB transport, 303A:8360 and vendor usage FF00/1). Candidate identity is not firmware compatibility. Do not send anything to a device solely because metadata matches.
-- Probe encodes only documented version/status frames, but no code opens a device or writes USB reports. Before live enablement, positively identify the physical device/revision and the running protocol; implement bounded reply reassembly/request correlation and distinguish a verified reply from a Basic-style match. Then check LED behavior on isolated test hardware.
-- T3 live adapter is not implemented: test-device desktop version must be pinned; evaluate documented authentication, local-only state subscription, opaque environment/thread IDs and exact router navigation. If no supported exact navigation hook exists at the pinned version, add a reviewed local T3-side change rather than keystroke injection or sidebar-index approximation. Do not pass auth tokens on a command line or extract them from existing processes.
-- Live slot reassignment is deliberately not enabled. Freeze the physical slot-to-session assignment for each live attachment (expired slots do nothing); do not silently reuse them without an evidenced device render/arming protocol.
-- The documented wire bytes are not yet proven against a vendor capture or against actual IOKit report ID handling. Do that before enabling live send/receive.
-- Finder demo bundle: dist/MicroCompanion.app. It is a local development build, not notarized, and was not installed or GUI-tested by this task.
-
-## Dormant read-only preflight
-`USBProbe.swift` now implements a **not wired to UI, not run** read-only Basic transport path. It newly enumerates scoped USB vendor collections, requires exact descriptor SHA-256 + device USB location + reported USB revision, 64-byte metadata and exactly one match, plus explicit separate operator confirmation and an already known compatible Basic version. USB revision is not PCB proof. The transport only admits typed version/status requests, expects independently correlated replies, and aborts on malformed frames, timeout or version mismatch. No LED command can enter this path. No HID output was sent from the demo build.
-The strict parser has manually authored wire fixtures, not a hardware/vendor capture. Numbered output report convention was cross-checked against libusb/hidapi's macOS implementation; hardware support for these conventions and response schema has not been verified. In particular, compare the recorded MAC/physical revision and descriptor from a known unit and use a test capture before exposing a call site.
-
-Rebuild the Finder demo with `bash scripts/package.sh` (add `--disable-sandbox` only on the trusted executor which prohibits nested SwiftPM sandboxes). The script stages a debug bundle for local development.
-
-## Dormant stock T3 0.1.7 navigation route
-The Swift core can now construct the exact stock v0.1.7 native route from a pair of validated opaque environment/thread IDs. It rejects any other app version and all characters beyond ASCII RFC 3986 unreserved (with dot segments also refused); it does not receive arbitrary URLs, select an app, open URLs, or inspect installed software. The demo is offline and never opens routes. A future live integration must verify the target app bundle and exact version plus supported authentication/state, bind a hardware-confirmed active slot, and verify cold/warm launch and native routing on an isolated synthetic T3 session.
-
-[자동 업데이트 배포 절차](docs/updates.md) · [제조사 앱 호환성 조사](docs/ai-micro-compatibility.md)
+[전체 키 매핑 가이드](docs/key-mapping.md) · [릴리스 목록](https://github.com/kyungtaek/keyberth/releases)

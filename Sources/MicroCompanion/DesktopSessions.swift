@@ -9,13 +9,24 @@ struct DesktopSession {
 }
 
 enum DesktopSessions {
+    static func visibleCodexSession(in items: [DesktopSession]) -> URL? {
+        guard let window = try? ClaudeControls.window(.codex),
+              let web = window.descendants({ $0.role == "AXWebArea" }, first:true).first,
+              let location = web.url("AXURL") else { return nil }
+        let route = (location.fragment ?? location.path).components(separatedBy:"?")[0]
+        let parts = route.split(separator:"/")
+        guard parts.count >= 2, ["local","threads"].contains(String(parts[parts.count-2])),
+              let id = UUID(uuidString:String(parts.last!)) else { return nil }
+        return items.first { UUID(uuidString:$0.url.lastPathComponent) == id }?.url
+    }
     static func read(_ profile: AppProfile, pendingT3Only: Bool = false) throws -> [DesktopSession] {
         if profile == .claude { return try ClaudeControls.sessions() }
         let home = FileManager.default.homeDirectoryForCurrentUser
         let codex = profile == .codex
         let db = home.appendingPathComponent(codex ? ".codex/state_5.sqlite" : ".t3/userdata/statev2.sqlite")
         let pending = "EXISTS (SELECT 1 FROM orchestration_v2_projection_runtime_requests q WHERE q.thread_id=t.thread_id AND q.status='pending')"
-        let scope = pendingT3Only ? "AND "+pending : ""
+        let settled = "(coalesce(json_extract(t.payload_json,'$.settledOverride'),'')='settled' OR json_extract(t.payload_json,'$.settledAt') IS NOT NULL)"
+        let scope = pendingT3Only ? "AND NOT "+settled+" AND "+pending : ""
         let limit = pendingT3Only ? "" : "LIMIT 6"
         let sql = codex ? """
             SELECT id, substr(coalesce(nullif(name,''), title),1,160) AS title, rollout_path
@@ -24,7 +35,8 @@ enum DesktopSessions {
             """ : """
             SELECT thread_id AS id,substr(title,1,160) AS title,
             (SELECT CAST(r.ordinal AS TEXT) FROM orchestration_v2_projection_runs r WHERE r.thread_id=t.thread_id ORDER BY r.ordinal DESC LIMIT 1) AS revision,
-            CASE WHEN \(pending)
+            CASE WHEN \(settled) THEN 'settled'
+            WHEN \(pending)
             THEN 'attention' ELSE (SELECT r.status FROM orchestration_v2_projection_runs r WHERE r.thread_id=t.thread_id ORDER BY r.ordinal DESC LIMIT 1) END AS status
             FROM orchestration_v2_projection_threads t WHERE archived_at IS NULL AND deleted_at IS NULL \(scope) ORDER BY updated_at DESC,thread_id \(limit)
             """
@@ -53,7 +65,7 @@ enum DesktopSessions {
             let url = codex ? (UUID(uuidString:row.id) == nil ? nil : URL(string:"codex://threads/"+row.id)) :
                 T3Navigation.url(installedVersion:version,target:Key(environment:environment,thread:row.id))
             guard let url else { return nil }
-            let states: [String:SessionLight] = ["attention":.attention,"running":.running,"completed":.done,"interrupted":.ready]
+            let states: [String:SessionLight] = ["attention":.attention,"running":.running,"completed":.done,"settled":.empty,"stopped":.empty,"interrupted":.ready,"cancelled":.empty]
             let (light,revision) = codex ? rolloutState(row.rollout_path) : (states[row.status ?? ""] ?? .unknown,row.revision)
             return DesktopSession(url:url,title:row.title ?? row.id,light:light,completionRevision:revision)
         }

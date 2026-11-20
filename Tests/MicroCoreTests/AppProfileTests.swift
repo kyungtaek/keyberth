@@ -11,7 +11,7 @@ final class AppProfileTests: XCTestCase {
             XCTAssertEqual(next.advanced(by: -1), profile)
             profile = next
         }
-        XCTAssertEqual(seen, [.cmux, .slack, .obsidian, .t3, .claude, .codex, .claudeCode])
+        XCTAssertEqual(seen, [.cmux,.t3,.codex,.claude,.claudeCode])
         XCTAssertEqual(profile, .cmux)
         XCTAssertNil(AppProfile.fixedAction("TOUCH"))
     }
@@ -42,13 +42,13 @@ final class AppProfileTests: XCTestCase {
         XCTAssertEqual(parse(channel.deepLink.absoluteString),channel)
     }
     func testAssistantLayoutsMatchMicroPositions() {
-        for profile in [AppProfile.t3,.claudeCode] {
+        for profile in [AppProfile.t3,.claudeCode,.codex] {
             for slot in 1...6 {
                 XCTAssertEqual(profile.defaultBinding(String(format:"K%02d", slot)), "recent."+String(slot))
             }
         }
         let expected: [AppProfile:[String]] = [
-            .codex:["cmd+a","cmd+c","cmd+v","cmd+x","cmd+z","cmd+shift+z","cmd+f","none","none","shift+enter","backspace","cmd+n","enter"],
+
             .claude:["cmd+b","ctrl+cmd+f","cmd+=","cmd+-","ctrl+shift+tab","ctrl+tab","escape","cmd+a","backspace","cmd+z","cmd+d","cmd+n","enter"]
         ]
         for (profile, keys) in expected {
@@ -57,6 +57,8 @@ final class AppProfileTests: XCTestCase {
                 XCTAssertEqual(profile.defaultBinding("JOY_"+direction.uppercased()),direction)
             }
         }
+        XCTAssertEqual((7...13).map {AppProfile.codex.defaultBinding(String(format:"K%02d",$0))},["agent.dots","agent.approve","agent.decline","agent.fork","agent.mic","agent.newChat","agent.submit"])
+        XCTAssertEqual(AppProfile(rawValue:"app.org.example.Editor")?.bundleIDs,["org.example.Editor"])
         for index in 7...13 {
             let key=String(format:"K%02d",index)
             XCTAssertEqual(AppProfile.claudeCode.defaultBinding(key),AppProfile.claude.defaultBinding(key))

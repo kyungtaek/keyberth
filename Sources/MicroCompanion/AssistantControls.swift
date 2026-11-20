@@ -94,6 +94,8 @@ enum AssistantControls {
             }
             try ClaudeControls.press(action == "agent.approve" ? ["allow once","allow this time","approve once","이번만 허용","이번 요청 승인","한 번 허용"] :
                                         ["decline","deny","거절","거부"],in:profile,approval:true)
+        case "agent.dots":
+            guard codex, NSWorkspace.shared.open(URL(string:"codex://dots")!) else { throw CompanionError("Dots 탭을 열 수 없습니다.") }
         case "agent.newChat":
             let chord = codex ? try codexChord("newTask",fallback:"cmd+n") : "cmd+n"
             try DesktopShortcut.send(chord,to:profile)

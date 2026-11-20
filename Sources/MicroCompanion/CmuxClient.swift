@@ -32,6 +32,12 @@ enum CmuxClient {
     static func list() throws -> [CmuxTarget] {
         try CmuxTarget.targets(run(["--json", "--id-format", "uuids", "tree", "--all"]))
     }
+    static func focusedID() throws -> UUID {
+        struct Focus: Decodable { let surface_id: UUID }
+        struct Identity: Decodable { let focused: Focus }
+        let data = try run(["--json","--id-format","uuids","identify","--no-caller"])
+        return try JSONDecoder().decode(Identity.self,from:data).focused.surface_id
+    }
     static func signal(_ target: CmuxTarget) throws -> WorkspaceSignal {
         let data = try run(["--json", "--id-format", "uuids", "workspace", "status",
                             "--workspace", target.workspace.uuidString, "--window", target.window.uuidString])
@@ -41,7 +47,7 @@ enum CmuxClient {
     }
     static func send(_ chord: String, to target: CmuxTarget) async throws {
         guard let key = FunctionKey.shortcut(chord),
-              try list().contains(where: { $0.active && $0.sameLocation(as: target) }) else {
+              try focusedID() == target.id else {
             throw CompanionError("활성 터미널이 변경되어 단축키 전송을 취소했습니다.")
         }
         if key.split(separator:"+").dropLast().contains("cmd") {
@@ -62,13 +68,15 @@ enum CmuxClient {
             _ = try run(["-a", "/Applications/cmux.app"], executable: "/usr/bin/open")
         }
         _ = try run(["focus-window"] + window)
+        _ = try run(["trigger-flash","--surface",target.id.uuidString] + workspace)
     }
 }
 
 extension CmuxClient {
     static func perform(_ input: DeckInput, override: String?) async throws {
         let live = try list()
-        guard let index = live.firstIndex(where: \.active) else { throw CompanionError("활성 cmux 터미널이 없습니다.") }
+        let focused = try focusedID()
+        guard let index = live.firstIndex(where: { $0.id == focused }) else { throw CompanionError("활성 cmux 터미널이 없습니다.") }
         let target = live[index]
         let workspace = ["--workspace", target.workspace.uuidString, "--window", target.window.uuidString]
         let surface = ["--surface", target.id.uuidString] + workspace
@@ -138,9 +146,9 @@ extension CmuxClient {
         return root?["restore_record"] as? [String:Any] ?? root?["resume_binding"] as? [String:Any]
     }
     private static func reply(to target: CmuxTarget, approve: Bool, surface: [String]) throws {
-        let record = try resume(surface)
+        let record = try? resume(surface)
         let checkpoint = (record?["checkpoint_id"] ?? record?["checkpoint"]) as? String
-        let data = try run(["--json","rpc","feed.list"])
+        let data = try run(["--json","--id-format","uuids","rpc","feed.list"])
         let feed = try JSONSerialization.jsonObject(with: data) as? [String:Any]
         let matches = (feed?["items"] as? [[String:Any]] ?? []).filter { item in
             guard item["kind"] as? String == "permissionRequest", item["status"] as? String == "pending" else { return false }
@@ -155,9 +163,9 @@ extension CmuxClient {
             throw CompanionError("현재 대화의 승인 요청 한 건을 식별할 수 없습니다. cmux Feed를 확인하세요.")
         }
         let params = try JSONSerialization.data(withJSONObject: ["request_id":id,"mode":approve ? "once" : "deny"])
-        guard try list().contains(where: { $0.active && $0.sameLocation(as: target) }) else { throw CompanionError("활성 세션이 바뀌었습니다.") }
+        guard try focusedID() == target.id else { throw CompanionError("활성 세션이 바뀌었습니다.") }
         let response = try run(["--json","rpc","feed.permission.reply",String(decoding: params, as: UTF8.self)])
-        guard (try JSONSerialization.jsonObject(with: response) as? [String:Bool])?["delivered"] == true else {
+        guard (try JSONSerialization.jsonObject(with: response) as? [String:Any])?["delivered"] as? Bool == true else {
             throw CompanionError("승인 요청이 이미 종료됐습니다.")
         }
     }
