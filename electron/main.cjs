@@ -4,6 +4,8 @@ const { createInterface } = require('node:readline');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 
+const { installPermissionGuide } = require('./permissions/guide.cjs');
+
 const page = path.join(__dirname, 'index.html');
 const helper = app.isPackaged ? path.join(process.resourcesPath, 'KeyberthBridge')
   : path.join(__dirname, '../.build/debug/MicroCompanion');
@@ -13,7 +15,7 @@ let hud, hudTimer, hudMessage, hudReady = false;
 function showHud(message) {
   hudMessage = message;
   if (!hud) {
-    hud = new BrowserWindow({width:336, height:104, frame:false, transparent:true, show:false,
+    hud = new BrowserWindow({width:300, height:84, frame:false, transparent:true, show:false,
       focusable:false, resizable:false, fullscreenable:false, skipTaskbar:true, hasShadow:false,
       webPreferences:{preload:path.join(__dirname,'hud-preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false}});
     hud.setIgnoreMouseEvents(true);
@@ -23,7 +25,7 @@ function showHud(message) {
       let applied = false;
       try {
         const glass = require('electron-liquid-glass');
-        applied = glass.isGlassSupported() && glass.addView(hud.getNativeWindowHandle(), {cornerRadius:24, opaque:false}) >= 0;
+        applied = glass.isGlassSupported() && glass.addView(hud.getNativeWindowHandle(), {cornerRadius:20, opaque:false}) >= 0;
       } catch (error) { console.warn('HUD material:', error.message); }
       if (!applied) hud.setVibrancy('hud');
       hudReady = true;
@@ -33,9 +35,9 @@ function showHud(message) {
     return;
   }
   if (!hudReady) return;
-  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).bounds;
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   const [width, height] = hud.getSize();
-  hud.setPosition(Math.round(area.x+(area.width-width)/2), Math.round(area.y+(area.height-height)/2));
+  hud.setPosition(Math.round(area.x+(area.width-width)/2), Math.round(area.y+Math.max(0,area.height-height-32)));
   hud.webContents.send('hud', message);
   hud.showInactive();
   clearTimeout(hudTimer);
@@ -113,6 +115,13 @@ function showPopup() {
 }
 ipcMain.handle('command', async (event, method, data) => {
   if (fileURLToPath(event.senderFrame.url) !== page) throw new Error('Unknown window');
+  if ((method==='installClaudeHooks'||method==='removeClaudeHooks') && editor && event.sender===editor.webContents) {
+    await require('./claude-hooks.cjs').configure(helper,method==='installClaudeHooks');
+    return true;
+  }
+  if (['importMaps','exportMaps'].includes(method) && editor && event.sender === editor.webContents) {
+    return require('./keymap-files.cjs').transfer(method, editor, dialog, request);
+  }
   if (method === 'chooseNote') {
     if (event.sender !== editor?.webContents) throw new Error('편집 창에서 문서를 선택하세요.');
     const pick = await dialog.showOpenDialog(editor, {
@@ -129,7 +138,7 @@ ipcMain.handle('command', async (event, method, data) => {
     throw new Error('Obsidian 보관함 안의 Markdown 문서를 선택하세요.');
   }
   if (method === 'editor' && ['mapping','device','sessions'].includes(data?.view)) return openEditor(data.view);
-  if (!['state','catalog','save','select','connect','readPrefs','savePrefs','readLighting','saveLighting','activateProfile','toggleAuto'].includes(method)) throw new Error('Unknown command');
+  if (!['state','catalog','save','select','connect','readPrefs','savePrefs','readLighting','saveLighting','activateProfile','toggleAuto','configureClaude'].includes(method)) throw new Error('Unknown command');
   const result = await request(method, data);
   if (method === 'select' && event.sender === popup?.webContents) popup.hide();
   return result;
@@ -145,11 +154,15 @@ else {
     const icon = nativeImage.createFromPath(path.join(__dirname, 'tray.png')).resize({width:18,height:18});
     icon.setTemplateImage(true);
     tray = new Tray(icon); tray.setToolTip('Keyberth · cmux'); tray.on('click', showPopup);
+    const permissionGuide = installPermissionGuide(request, () => editor);
+    const checkUpdates = require('./updates.cjs').configureUpdates(() => { quitting = true; });
     const items = [{ label:'키 매핑', click:()=>openEditor() }, { label:'기기 설정…', accelerator:'Cmd+,', click:()=>openEditor('device') },
-      {type:'separator'}, {label:'Keyberth 종료', role:'quit'}];
+      {label:'권한 안내…', click:()=>{ openEditor(); permissionGuide.showOnDemand(); }},
+      {label:'업데이트 확인…',click:checkUpdates}, {type:'separator'}, {label:'Keyberth 종료', role:'quit'}];
     tray.on('right-click', () => tray.popUpContextMenu(Menu.buildFromTemplate(items)));
     Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Keyberth', submenu:items},{role:'editMenu'},{role:'windowMenu'}]));
     openEditor(process.argv.includes('--show-slots') ? 'sessions' : 'mapping');
+    permissionGuide.checkAtStartup();
   });
   app.on('activate', () => openEditor());
   app.on('before-quit', () => { quitting = true; bridge?.stdin.end(); });

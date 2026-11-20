@@ -39,10 +39,14 @@ enum CmuxClient {
         guard signal.workspace_id == target.workspace else { throw CompanionError("작업공간 상태 불일치") }
         return signal
     }
-    static func send(_ chord: String, to target: CmuxTarget) throws {
+    static func send(_ chord: String, to target: CmuxTarget) async throws {
         guard let key = FunctionKey.shortcut(chord),
               try list().contains(where: { $0.active && $0.sameLocation(as: target) }) else {
             throw CompanionError("활성 터미널이 변경되어 단축키 전송을 취소했습니다.")
+        }
+        if key.split(separator:"+").dropLast().contains("cmd") {
+            try await DesktopShortcut.send(key, to:.cmux)
+            return
         }
         // cmux accepts the named "space" key but emits no byte for it.
         _ = try run([key == "space" ? "send" : "send-key", "--window", target.window.uuidString, "--workspace",
@@ -62,13 +66,13 @@ enum CmuxClient {
 }
 
 extension CmuxClient {
-    static func perform(_ input: DeckInput, override: String?) throws {
+    static func perform(_ input: DeckInput, override: String?) async throws {
         let live = try list()
         guard let index = live.firstIndex(where: \.active) else { throw CompanionError("활성 cmux 터미널이 없습니다.") }
         let target = live[index]
         let workspace = ["--workspace", target.workspace.uuidString, "--window", target.window.uuidString]
         let surface = ["--surface", target.id.uuidString] + workspace
-        if let override { try send(override, to: target); return }
+        if let override { try await send(override, to: target); return }
         switch input {
         case .turn(let step):
             try focus(live[(index + live.count + step) % live.count])
@@ -77,7 +81,7 @@ extension CmuxClient {
         case .key(7): _ = try run(["new-workspace", "--window", target.window.uuidString, "--focus", "true"])
         case .key(8), .key(9): try reply(to: target, approve: input == .key(8), surface: surface)
         case .key(10): _ = try run(["right-sidebar", "show"] + workspace)
-        case .key(11): try send("space", to: target)
+        case .key(11): try await send("space", to: target)
         case .key(12):
             let record = try CodexBinding.recordForFork(target, surface: surface)
             guard let record, let checkpoint = record["checkpoint_id"] as? String, !checkpoint.isEmpty else {
@@ -95,7 +99,7 @@ extension CmuxClient {
                 throw CompanionError("이 대화에는 실행 가능한 포크 명령이 없습니다.")
             }
             _ = try run(["new-split", "right", "--focus", "true", "--command", fork] + surface)
-        case .key(13): try send("enter", to: target)
+        case .key(13): try await send("enter", to: target)
         default: break
         }
     }

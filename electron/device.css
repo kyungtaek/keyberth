@@ -108,6 +108,7 @@
 .joy [data-control=JOY_RIGHT] { right: 1%; top: 33.33%; }
 
 .cap[data-led] .keyNum::after { content:""; display:inline-block; width:7px; height:7px; margin-left:4px; border-radius:50%; background:var(--session-color,#778381); }
-.cap[data-led="2"] { --session-color:#248ce1; }
-.cap[data-led="3"] { --session-color:#df545b; }
-.cap[data-led="4"] { --session-color:#9864de; }
+.cap[data-led="1"] { --session-color:#fff; }
+.cap[data-led="2"] { --session-color:#268aff; }
+.cap[data-led="3"] { --session-color:#ff9800; }
+.cap[data-led="4"] { --session-color:#31c56b; }

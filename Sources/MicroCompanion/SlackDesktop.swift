@@ -35,8 +35,12 @@ struct AppNode {
     func press() throws {
         guard AXUIElementPerformAction(element,kAXPressAction as CFString) == .success else { throw CompanionError("앱에서 항목을 실행할 수 없습니다.") }
     }
+    func url(_ key:String) -> URL? {
+        let value = attr(key)
+        return (value as? URL) ?? (value as? String).flatMap(URL.init(string:))
+    }
     var isMessage: Bool {
-        identifier.range(of:#"(message_container|message-container|message-list-item|^message[-_]\d)"#,options:.regularExpression) != nil
+        identifier.range(of:#"(message_container|message-container|message-list-item|c-message_kit__background|^message[-_]\d)"#,options:.regularExpression) != nil
     }
     var isThread: Bool {
         ["AXGroup","AXSplitGroup","AXWindow","AXLandmarkRegion"].contains(role) &&
@@ -45,7 +49,22 @@ struct AppNode {
     func named(_ words:[String]) -> Bool { words.contains(where:name.contains) }
 }
 
-enum SlackDesktop {
+@MainActor enum SlackDesktop {
+    struct Slot {
+        let conversation:SlackConversation
+        var name:String
+        var latest:String
+    }
+    private(set) static var slots=[Slot]()
+    private static var slotsDate = Date.distantPast
+    static func clearSlots() { slots=[];slotsDate = .distantPast }
+    static func open(_ conversation:SlackConversation) async throws {
+        guard let client=NSWorkspace.shared.urlForApplication(withBundleIdentifier:AppProfile.slack.bundleIDs[0]) else {
+            throw CompanionError("Mac용 Slack 앱을 찾을 수 없습니다.")
+        }
+        _ = try await NSWorkspace.shared.open([conversation.deepLink],withApplicationAt:client,configuration:.init())
+    }
+
     private static func window(_ app: AppNode) throws -> AppNode {
         guard let win=app.node("AXFocusedWindow") else { throw CompanionError("Slack 창을 열고 손쉬운 사용 권한을 확인하세요.") }
         return win
@@ -58,37 +77,79 @@ enum SlackDesktop {
         throw CompanionError("Slack에서 해당 화면을 찾을 수 없습니다.")
     }
     private static func openUnread(_ slot:Int, app:AppNode) async throws {
-        try await DesktopShortcut.send("cmd+shift+a",to:.slack)
-        let area=try await waitFor {
-            try window(app).descendants({ node in
-                ["AXGroup","AXLandmarkRegion","AXList","AXScrollArea","AXSplitGroup"].contains(node.role) &&
-                (node.identifier.contains("all_unreads") || node.identifier.contains("all-unreads") || ["unreads","읽지 않음","읽지 않은 메시지"].contains(node.name))
-            }, first:true).first
+        func unreadArea(_ win:AppNode) -> AppNode? {
+            win.descendants({ node in
+                guard ["AXGroup","AXLandmarkRegion","AXList","AXScrollArea","AXSplitGroup","AXWebArea"].contains(node.role) else { return false }
+                let id=node.identifier
+                return id.contains("all_unreads") || id.contains("all-unreads") || id.contains("allunreads") ||
+                    ["unreads","all unreads","읽지 않음","읽지 않은 메시지"].contains(node.name)
+            },first:true).first
         }
-        // Slack permalink timestamps sort exactly as decimal digit strings. Each
-        // conversation contributes only its newest unread message to the six slots.
-        var newest=[String:(String,AppNode)]()
-        for link in area.descendants({ $0.role == "AXLink" }) {
-            guard let url=(link.attr("AXURL") as? URL) ?? (link.attr("AXURL") as? String).flatMap(URL.init(string:)),
-                  let item=SlackAction.permalink(url) else { continue }
-            if newest[item.channel].map({ $0.0 >= item.timestamp }) == true { continue }
-            newest[item.channel]=(item.timestamp,link)
+        let initial=try window(app)
+        let webArea=initial.descendants({$0.role=="AXWebArea"},first:true).first
+        let initialTeam=[webArea?.url("AXURL"),initial.url("AXDocument")].compactMap{$0}.compactMap(SlackConversation.workspace).first
+        if Date().timeIntervalSince(slotsDate)<10, slots.indices.contains(slot-1), slots[slot-1].conversation.team == initialTeam {
+            try await open(slots[slot-1].conversation)
+            return
         }
-        let ranked=newest.sorted { $0.value.0 == $1.value.0 ? $0.key < $1.key : $0.value.0 > $1.value.0 }
-        guard ranked.indices.contains(slot-1) else { throw CompanionError("읽지 않음 화면에서 \(slot)번째 대화를 찾을 수 없습니다.") }
-        try ranked[slot-1].value.1.press()
+        clearSlots()
+        if unreadArea(initial) == nil { try DesktopShortcut.send("cmd+shift+a",to:.slack) }
+        let area=try await waitFor { unreadArea(try window(app)) }
+        let win=try window(app)
+        let snapshot = try await Task.detached(priority:.userInitiated) { () throws -> [Slot] in
+            try Task.checkCancellation()
+            let web=area.ancestors.first(where:{$0.role=="AXWebArea"})
+            let currentTeam=[web?.url("AXURL"),win.url("AXDocument")].compactMap{$0}.compactMap(SlackConversation.workspace).first ?? initialTeam
+            var byID=[SlackConversation:Slot](), order=[SlackConversation]()
+            for node in area.descendants({$0.role=="AXLink"}) {
+                guard let url=node.url("AXURL"),let id=SlackConversation.parse(url,currentTeam:currentTeam),
+                      currentTeam == nil || id.team == currentTeam else { continue }
+                // Only navigation headers and message timestamps identify the
+                // containing channel. Links posted inside a message may point elsewhere.
+                let timestamp=SlackAction.permalink(url)?.timestamp
+                let isTime=node.identifier.contains("timestamp") || node.identifier.contains("time_stamp") ||
+                    node.name.range(of:#"\d{1,2}:\d{2}"#,options:.regularExpression) != nil
+                let parents=node.ancestors.dropFirst()
+                let body=parents.contains { $0.identifier.contains("rich_text") || $0.identifier.contains("message-text") || $0.identifier.contains("message__body") }
+                guard !body, timestamp == nil ? !parents.contains(where:{$0.isMessage}) : isTime else { continue }
+                let title=(node.attr("AXTitle") as? String ?? node.attr("AXDescription") as? String ?? "").trimmingCharacters(in:.whitespacesAndNewlines)
+                var entry=byID[id] ?? Slot(conversation:id,name:id.channel,latest:"")
+                if byID[id] == nil { order.append(id) }
+                if let timestamp { entry.latest=max(entry.latest,timestamp) }
+                else if !title.isEmpty { entry.name=title }
+                byID[id]=entry
+            }
+            let ranked=order.enumerated().sorted { lhs,rhs in
+                let l=byID[lhs.element]!.latest,r=byID[rhs.element]!.latest
+                return l == r ? lhs.offset < rhs.offset : l > r
+            }
+            return ranked.prefix(6).compactMap { byID[$0.element] }
+        }.value
+        try Task.checkCancellation()
+        slots=snapshot
+        slotsDate=Date()
+        guard slots.indices.contains(slot-1) else { throw CompanionError("Slack 읽지 않음 화면에서 식별한 대화는 "+String(slots.count)+"개입니다.") }
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == AppProfile.slack.bundleIDs[0] else { throw CompanionError("Slack 포커스가 변경되었습니다.") }
+        try await open(slots[slot-1].conversation)
     }
     static func perform(_ input:String) async throws {
-        guard let running=NSRunningApplication.runningApplications(withBundleIdentifier:AppProfile.slack.bundleIDs[0]).first else {
-            throw CompanionError("Slack 데스크톱 앱을 먼저 열어 주세요.")
+        guard let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:AppProfile.slack.bundleIDs[0]) else {
+            throw CompanionError("Mac용 Slack을 찾을 수 없습니다.")
         }
+        let running: NSRunningApplication
+        if let opened=NSRunningApplication.runningApplications(withBundleIdentifier:AppProfile.slack.bundleIDs[0]).first {
+            running=opened
+        } else { running=try await NSWorkspace.shared.openApplication(at:url,configuration:.init()) }
+        if !running.isActive { running.activate(options:[]) }
+        for _ in 0..<20 where !running.isActive { try await Task.sleep(for:.milliseconds(60)) }
+        guard running.isActive else { throw CompanionError("Slack 창을 전면으로 가져올 수 없습니다.") }
+        guard AXIsProcessTrusted() else { throw CompanionError("Slack 제어에는 macOS 손쉬운 사용 권한이 필요합니다.") }
         let app=AppNode(element:AXUIElementCreateApplication(running.processIdentifier))
         AXUIElementSetMessagingTimeout(app.element,0.4)
-        if let chord=["JOY_LEFT":"cmd+[","JOY_RIGHT":"cmd+]","JOY_UP":"alt+shift+up","JOY_DOWN":"alt+shift+down","K12":"cmd+n"][input] {
-            try await DesktopShortcut.send(chord,to:.slack); return
-        }
-        guard AXIsProcessTrusted() else { throw CompanionError("Slack 제어에는 macOS 손쉬운 사용 권한이 필요합니다.") }
         AXUIElementSetAttributeValue(app.element,"AXManualAccessibility" as CFString,kCFBooleanTrue)
+        if let chord=["JOY_LEFT":"cmd+[","JOY_RIGHT":"cmd+]","JOY_UP":"alt+shift+up","JOY_DOWN":"alt+shift+down","K12":"cmd+n"][input] {
+            try DesktopShortcut.send(chord,to:.slack); return
+        }
         if input.hasPrefix("K"), let slot=Int(input.dropFirst()), (1...6).contains(slot) {
             try await openUnread(slot,app:app); return
         }
@@ -96,10 +157,10 @@ enum SlackDesktop {
         switch input {
         case "K07","K08":
             if focused?.ancestors.contains(where:{ $0.isMessage }) == true {
-                try await DesktopShortcut.send(input=="K07" ? "up":"down",to:.slack)
+                try DesktopShortcut.send(input=="K07" ? "up":"down",to:.slack)
             } else {
                 let root=try focused?.ancestors.first(where:{ $0.isThread }) ?? window(app)
-                guard let last=root.descendants({$0.isMessage}).last,
+                guard let last=(input=="K07" ? root.descendants({$0.isMessage}).last : root.descendants({$0.isMessage},first:true).first),
                       AXUIElementSetAttributeValue(last.element,kAXFocusedAttribute as CFString,kCFBooleanTrue) == .success else {
                     throw CompanionError("메시지 목록에 포커스를 둘 수 없습니다.")
                 }
@@ -107,15 +168,19 @@ enum SlackDesktop {
         case "K09":
             guard let message=focused?.ancestors.first(where:{ $0.isMessage }),
                   let replies=message.descendants({ ["AXButton","AXLink"].contains($0.role) &&
-                    $0.name.range(of:#"(\d+[\s,]*(repl(y|ies)|개의? 답글|답글)|답글\s*\d+)"#,options:.regularExpression) != nil },first:true).first else { return }
+                    $0.name.range(of:#"(\d+[\s,]*(repl(y|ies)|개의? 답글|답글)|답글\s*\d+)"#,options:.regularExpression) != nil },first:true).first else { throw CompanionError("포커스된 메시지에 열 수 있는 답글이 없습니다.") }
             try replies.press()
         case "K10":
             guard let thread=focused?.ancestors.first(where:{ $0.isThread }),
-                  let close=thread.descendants({ $0.role=="AXButton" && $0.named(["close","닫기"]) },first:true).first else { return }
+                  let close=thread.descendants({ $0.role=="AXButton" && $0.named(["close","닫기"]) },first:true).first else { throw CompanionError("포커스된 스레드의 닫기 버튼을 찾을 수 없습니다.") }
             try close.press()
         case "K11":
-            try await DesktopShortcut.send("cmd+shift+o",to:.slack)
-            let mini=try await waitFor { let w=try window(app); return w.named(["slackbot","슬랙봇"]) ? w:nil }
+            try DesktopShortcut.send("cmd+shift+o",to:.slack)
+            let mini=try await waitFor {
+                let w=try window(app)
+                if w.named(["slackbot","슬랙봇"]) { return w }
+                return w.descendants({ ["AXDialog","AXSheet","AXGroup"].contains($0.role) && ($0.identifier.contains("slackbot_mini") || $0.identifier.contains("slackbot-mini")) },first:true).first
+            }
             if let fresh=mini.descendants({ $0.role=="AXButton" && $0.named(["new conversation","new chat","새 대화","새 채팅"]) },first:true).first { try fresh.press() }
             else if mini.descendants({ $0.role=="AXTextArea" && ($0.attr("AXValue") as? String ?? "").isEmpty },first:true).isEmpty {
                 throw CompanionError("Slackbot 새 질문 입력란을 찾을 수 없습니다.")
@@ -123,7 +188,7 @@ enum SlackDesktop {
         case "K13":
             guard let editor=focused?.ancestors.first(where:{ $0.role=="AXTextArea" || $0.identifier.contains("ql-editor") }),
                   let send=editor.ancestors.lazy.filter({ $0.identifier.contains("msg_input") || $0.identifier.contains("message_input") || $0.identifier.contains("message-input") || $0.identifier.contains("composer") }).compactMap({ composer in
-                    composer.descendants({ $0.role=="AXButton" && $0.named(["send now","send message","메시지 보내기","지금 보내기"]) && !$0.named(["schedule","예약"]) },first:true).first
+                    composer.descendants({ $0.role=="AXButton" && ($0.name=="send" || $0.named(["send now","send message","send a message","메시지 보내기","지금 보내기","보내기"])) && ($0.attr("AXEnabled") as? Bool != false) && !$0.named(["schedule","later","예약","나중에"]) },first:true).first
                   }).first else { throw CompanionError("보낼 메시지의 입력란에 포커스를 두세요.") }
             try send.press()
         default: break

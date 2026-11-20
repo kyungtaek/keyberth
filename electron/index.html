@@ -6,8 +6,10 @@
 <div id="noteFields" hidden><label>열 문서</label><strong id="noteTitle"></strong> <button id="chooseNote" class="ghost">문서 선택…</button></div>
 <div id="chordFields" hidden><label>함께 누를 키</label><div id="mods" class="mods"></div><label for="base">기본 키</label><select id="base"></select><output id="chord"></output></div>
 <div class="editFoot"><div class="current"><span>현재 배정</span><strong id="current"></strong></div><div class="actions"><button class="ghost" id="restore">기본값 복원</button><button class="primary" id="save">저장</button></div></div></aside></section>
-<section id="sessions" class="simple" hidden><div class="section-title"><h1>최근 세션<span>.</span></h1><button class="ghost" id="openEditor">키 매핑 ↗</button></div><div id="slots"></div></section>
+<section id="sessions" class="simple" hidden><div class="section-title"><h1>최근 세션<span>.</span></h1><button class="ghost" id="openEditor">키 매핑 ↗</button></div><div id="slots"></div><details id="claudeSlots" hidden><summary>Claude Code 슬롯 설정</summary><div id="claudeSlotFields"></div></details></section>
 <section id="device" class="simple" hidden><div class="section-title"><h1>기기 설정<span>.</span></h1><small>AI Micro</small></div><div class="pref"><label for="sleep">자동 절전 <small>0분이면 끔</small></label><div><input id="sleep" type="number" min="0" max="120" step="1"> 분</div></div><div class="pref"><label for="volume">부저 볼륨</label><div><input id="volume" type="range" min="0" max="100"><output id="volumeText"></output></div></div><p id="buzzer"></p><div class="actions"><button id="readPrefs" class="ghost">다시 읽기</button><button id="savePrefs" class="primary">기기에 저장</button></div>
+<div class="pref"><strong>키맵 파일</strong><div class="actions"><button id="importMaps">JSON 가져오기…</button><button id="exportMaps">JSON 내보내기…</button></div></div>
+<div class="pref"><strong>Claude Code 세션 훅</strong><div class="actions"><button id="installClaudeHooks">연결</button><button id="removeClaudeHooks">해제</button></div></div>
 <section id="lighting"><h2>세션 조명</h2><label for="lightState">세션 상태</label><select id="lightState"></select>
 <div id="lightZones"></div>
 <p class="legend">바닥 조명은 선택된 세션을 따릅니다. 선택이 없으면 입력 요청, 실행 중, 완료 순으로 표시합니다.</p>

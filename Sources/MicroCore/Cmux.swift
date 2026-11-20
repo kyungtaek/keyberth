@@ -35,11 +35,11 @@ public enum SessionLight: String, CaseIterable {
     case active = "현재 터미널", ready = "대기", unknown = "상태 미확인", empty = "빈 슬롯"
     public var rgb: Int {
         switch self {
-        case .attention: return 0xF59F22
-        case .running: return 0x008ECB
-        case .done: return 0x9863DA
-        case .active: return 0x13965B
-        case .ready: return 0x52677A
+        case .attention: return 0xFF9800
+        case .running: return 0x268AFF
+        case .done: return 0x31C56B
+        case .active: return 0xFFFFFF
+        case .ready: return 0xFFFFFF
         case .unknown: return 0x544D47
         case .empty: return 0
         }
@@ -71,7 +71,7 @@ public enum FunctionKey {
         return range.first { event.params.k == String(format: "ACT%02d", $0) }
     }
 
-    public static let modifiers = ["ctrl", "alt", "shift"]
+    public static let modifiers = ["cmd", "ctrl", "alt", "shift"]
     public static let specialKeys = ["enter", "escape", "tab", "backspace", "delete", "up", "down", "left", "right", "home", "end", "space"] + (1...12).map { "f\($0)" }
 
     public static func shortcut(_ value: String) -> String? {
@@ -81,7 +81,7 @@ public enum FunctionKey {
         let allowed = Self.modifiers
         let letter = key.utf8.count == 1 && key.utf8.allSatisfy { (97...122).contains($0) || (48...57).contains($0) }
         guard Set(modifiers).count == modifiers.count, modifiers.allSatisfy(allowed.contains),
-              specialKeys.contains(key) || (letter && !modifiers.isEmpty) else { return nil }
+              specialKeys.contains(key) || ((letter || ["=", "-", "[", "]"].contains(key)) && !modifiers.isEmpty) else { return nil }
         return (allowed.filter(modifiers.contains) + [key]).joined(separator: "+")
     }
 }

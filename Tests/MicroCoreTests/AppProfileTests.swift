@@ -11,7 +11,7 @@ final class AppProfileTests: XCTestCase {
             XCTAssertEqual(next.advanced(by: -1), profile)
             profile = next
         }
-        XCTAssertEqual(seen, [.cmux, .slack, .obsidian, .t3, .claude, .codex])
+        XCTAssertEqual(seen, [.cmux, .slack, .obsidian, .t3, .claude, .codex, .claudeCode])
         XCTAssertEqual(profile, .cmux)
         XCTAssertNil(AppProfile.fixedAction("TOUCH"))
     }
@@ -29,19 +29,37 @@ final class AppProfileTests: XCTestCase {
         XCTAssertNil(SlackAction.permalink(URL(string:"https://example.org/archives/C123/p1712345678123456")!))
         XCTAssertNil(SlackAction.permalink(URL(string:"https://example.slack.com/archives/C123")!))
     }
+    func testSlackChannelIdentityAcrossWorkspaces() throws {
+        let channel=try XCTUnwrap(SlackConversation(team:"T123",channel:"C456"))
+        func parse(_ value:String, _ team:String?=nil)->SlackConversation? {
+            SlackConversation.parse(URL(string:value)!,currentTeam:team)
+        }
+        XCTAssertEqual(parse("https://app.slack.com/client/T123/C456"),channel)
+        XCTAssertEqual(parse("https://acme.slack.com/archives/C456/p1234567890123456","T123"),channel)
+        XCTAssertNil(parse("https://acme.slack.com/archives/C456"))
+        XCTAssertNil(parse("https://app.slack.com.example.org/client/T123/C456"))
+        XCTAssertNotEqual(parse("https://app.slack.com/client/T567/C456"),channel)
+        XCTAssertEqual(parse(channel.deepLink.absoluteString),channel)
+    }
     func testAssistantLayoutsMatchMicroPositions() {
-        for profile in [AppProfile.t3,.claude,.codex] {
+        for profile in [AppProfile.t3,.claudeCode] {
             for slot in 1...6 {
-                let value = profile.defaultBinding(String(format:"K%02d",slot))
-                XCTAssertEqual(value,"recent.\(slot)")
-                XCTAssertNotNil(profile.agentActions[value])
+                XCTAssertEqual(profile.defaultBinding(String(format:"K%02d", slot)), "recent."+String(slot))
             }
         }
-        for profile in [AppProfile.claude,.codex] {
-            let actions = (7...13).map { profile.defaultBinding(String(format:"K%02d",$0)) }
-            XCTAssertEqual(actions,["agent.fast","agent.approve","agent.decline","agent.fork","agent.mic","agent.newChat","agent.submit"])
-            XCTAssertTrue(actions.allSatisfy { profile.agentActions[$0] != nil })
-            XCTAssertEqual(profile.defaultBinding("JOY_UP"),"agent.plan")
+        let expected: [AppProfile:[String]] = [
+            .codex:["cmd+a","cmd+c","cmd+v","cmd+x","cmd+z","cmd+shift+z","cmd+f","none","none","shift+enter","backspace","cmd+n","enter"],
+            .claude:["cmd+b","ctrl+cmd+f","cmd+=","cmd+-","ctrl+shift+tab","ctrl+tab","escape","cmd+a","backspace","cmd+z","cmd+d","cmd+n","enter"]
+        ]
+        for (profile, keys) in expected {
+            XCTAssertEqual((1...13).map { profile.defaultBinding(String(format:"K%02d",$0)) }, keys)
+            for direction in ["up","down","left","right"] {
+                XCTAssertEqual(profile.defaultBinding("JOY_"+direction.uppercased()),direction)
+            }
+        }
+        for index in 7...13 {
+            let key=String(format:"K%02d",index)
+            XCTAssertEqual(AppProfile.claudeCode.defaultBinding(key),AppProfile.claude.defaultBinding(key))
         }
     }
 

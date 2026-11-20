@@ -3,6 +3,7 @@ import MicroCore
 
 enum KeyMap {
     static let preferences = UserDefaults(suiteName: "local.kent.microcmux")!
+    static var savedMaps: [String:[String:String]]? { preferences.dictionary(forKey:"keymapOverridesV1") as? [String:[String:String]] }
     static let preference = "physicalKeyMappings"
     static let keys = (1...13).map { String(format: "K%02d", $0) }
     static let knob = ["ENC_CCW", "ENC_CW"]

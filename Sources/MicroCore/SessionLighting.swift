@@ -24,7 +24,7 @@ public struct SessionLighting: Codable, Equatable {
     public static let initial = Self(rules:Dictionary(uniqueKeysWithValues: SessionLight.allCases.map { state in
         let color: String
         switch state {
-        case .attention: color="#EF5350"
+        case .attention: color="#FF9800"
         case .running: color="#268AFF"
         case .unknown: color="#939DA5"
         default: color=String(format:"#%06X",state.rgb)
@@ -32,6 +32,19 @@ public struct SessionLighting: Codable, Equatable {
         let effect = [.unknown,.empty].contains(state) ? 0 : ([.attention,.running].contains(state) ? 4 : 1)
         return (state.rawValue,Rule(slot:Style(color:color,effect:effect),ambient:Style(color:color,effect:0)))
     }))
+
+    /// Migrate only unchanged factory colors, preserving user-selected colors,
+    /// animation effects and the separate ambient configuration.
+    public var migratingLegacySlotColors: Self {
+        let previous: [SessionLight:String] = [.active:"#13965B",.ready:"#52677A",.done:"#9863DA",.attention:"#EF5350"]
+        var updated=rules
+        for (state,color) in previous {
+            guard let rule=rules[state.rawValue], rule.slot.color == color,
+                  let replacement=Self.initial.rules[state.rawValue]?.slot.color else { continue }
+            updated[state.rawValue]=Rule(slot:Style(color:replacement,effect:rule.slot.effect),ambient:rule.ambient)
+        }
+        return Self(rules:updated)
+    }
 
     public func commands(states:[SessionLight], selected:Int?, firstID:Int) throws -> [[[UInt8]]] {
         guard valid, states.count == 6 else { throw LED.Invalid.colors }

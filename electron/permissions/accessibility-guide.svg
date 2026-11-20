@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 536 136" role="img" aria-labelledby="heading">
+  <title id="heading">손쉬운 사용 목록의 Keyberth 스위치</title>
+  <defs><linearGradient id="mark" x2="1" y2="1" gradientUnits="objectBoundingBox"><stop stop-color="#72ebdf"/><stop offset=".55" stop-color="#90bcfa"/><stop offset="1" stop-color="#eeb0df"/></linearGradient></defs>
+  <rect width="536" height="136" rx="10" fill="#111519"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,sans-serif">
+    <rect x="34" y="13" width="468" height="110" rx="11" fill="#25292f" stroke="#414a50"/>
+    <text x="54" y="37" fill="#e9eded" font-size="14" font-weight="600">손쉬운 사용</text>
+    <rect x="49" y="48" width="438" height="46" rx="8" fill="#32383d"/>
+    <rect x="62" y="58" width="27" height="27" rx="7" fill="url(#mark)"/>
+    <path d="M69 63v16m3-7 9-9m-8 8 8 8" fill="none" stroke="#18282a" stroke-width="2.7" stroke-linecap="round"/>
+    <text x="100" y="77" fill="white" font-size="16" font-weight="600">Keyberth</text>
+    <rect x="425" y="60" width="44" height="23" rx="12" fill="#58a3ff"/>
+    <circle cx="457" cy="71.5" r="9" fill="white"/>
+    <path d="M389 71h27m-6-6 6 6-6 6" stroke="#90e7df" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M57 105v9m-4.5-4.5h9" stroke="#c5cbd0" stroke-width="1.5" stroke-linecap="round"/>
+  </g>
+</svg>

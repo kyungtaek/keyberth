@@ -25,3 +25,29 @@ extension SlackAction {
         return (parts[2],String(parts[3].dropFirst()))
     }
 }
+
+/// A slot belongs to a workspace and a conversation. Names can be duplicated
+/// across workspaces and message links can carry thread query parameters.
+public struct SlackConversation: Equatable, Hashable {
+    public let team, channel:String
+    public init?(team:String,channel:String) {
+        guard team.range(of:"^T[A-Z0-9]+$",options:.regularExpression) != nil,
+              channel.range(of:"^[CDG][A-Z0-9]+$",options:.regularExpression) != nil else { return nil }
+        self.team=team;self.channel=channel
+    }
+    public var deepLink:URL { URL(string:"slack://channel?team="+team+"&id="+channel)! }
+    public static func workspace(_ url:URL) -> String? {
+        guard url.scheme == "https", url.host == "app.slack.com", url.pathComponents.count >= 3,
+              url.pathComponents[1] == "client" else { return nil }
+        let id=url.pathComponents[2]
+        return id.range(of:"^T[A-Z0-9]+$",options:.regularExpression) == nil ? nil : id
+    }
+    public static func parse(_ url:URL, currentTeam:String?) -> Self? {
+        if let team=workspace(url), url.pathComponents.count >= 4 { return Self(team:team,channel:url.pathComponents[3]) }
+        if url.scheme == "slack",url.host == "channel",let items=URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems,
+           let team=items.first(where:{$0.name=="team"})?.value,let id=items.first(where:{$0.name=="id"})?.value { return Self(team:team,channel:id) }
+        guard url.scheme=="https",let host=url.host,host.hasSuffix(".slack.com") || host=="slack.com",
+              let team=currentTeam,url.pathComponents.count>=3,url.pathComponents[1]=="archives" else { return nil }
+        return Self(team:team,channel:url.pathComponents[2])
+    }
+}

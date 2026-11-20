@@ -2,6 +2,12 @@ import XCTest
 @testable import MicroCore
 
 final class FunctionAndLightTests: XCTestCase {
+    func testMacCommandChords() {
+        XCTAssertEqual(FunctionKey.shortcut("ctrl+cmd+k"), "cmd+ctrl+k")
+        XCTAssertEqual(FunctionKey.shortcut("cmd+alt+shift+="), "cmd+alt+shift+=")
+        XCTAssertEqual(FunctionKey.shortcut("cmd+f"), "cmd+f")
+        XCTAssertNil(FunctionKey.shortcut("cmd+cmd+k"))
+    }
     func testFunctionKeysOnlyDispatchDownForExactPhysicalPositions() {
         func event(_ key: String, _ action: Int) -> Data {
             Data("{\"method\":\"v.oai.hid\",\"params\":{\"k\":\"\(key)\",\"act\":\(action)}}".utf8)
@@ -33,7 +39,15 @@ final class FunctionAndLightTests: XCTestCase {
         XCTAssertEqual(try light(false, false, "done", false), .done)
         XCTAssertEqual(try light(false, false, "todo", true), .active)
         XCTAssertEqual(try light(false, false, "todo", false), .ready)
-        XCTAssertEqual(Set(SessionLight.allCases.map(\.rgb)).count, SessionLight.allCases.count)
+        XCTAssertEqual(SessionLight.ready.rgb,0xFFFFFF)
+        XCTAssertEqual(SessionLight.active.rgb,SessionLight.ready.rgb)
+        var indicator = CompletionIndicator()
+        XCTAssertEqual(indicator.display(.done,id:"a",revision:"1"),.ready)
+        XCTAssertEqual(indicator.display(.running,id:"a"),.running)
+        XCTAssertEqual(indicator.display(.done,id:"a",revision:"2"),.done)
+        indicator.markViewed("a")
+        XCTAssertEqual(indicator.display(.done,id:"a",revision:"2"),.ready)
+        XCTAssertEqual(indicator.display(.done,id:"a",revision:"3"),.done)
         XCTAssertEqual(SessionLight.empty.rgb, 0)
     }
 }

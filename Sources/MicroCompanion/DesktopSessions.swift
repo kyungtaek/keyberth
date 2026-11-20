@@ -4,7 +4,8 @@ import MicroCore
 struct DesktopSession {
     let url: URL
     let title: String
-    let light: SessionLight
+    var light: SessionLight
+    var completionRevision: String? = nil
 }
 
 enum DesktopSessions {
@@ -22,6 +23,7 @@ enum DesktopSessions {
             ORDER BY coalesce(recency_at_ms,updated_at_ms,updated_at*1000) DESC,id LIMIT 6
             """ : """
             SELECT thread_id AS id,substr(title,1,160) AS title,
+            (SELECT CAST(r.ordinal AS TEXT) FROM orchestration_v2_projection_runs r WHERE r.thread_id=t.thread_id ORDER BY r.ordinal DESC LIMIT 1) AS revision,
             CASE WHEN \(pending)
             THEN 'attention' ELSE (SELECT r.status FROM orchestration_v2_projection_runs r WHERE r.thread_id=t.thread_id ORDER BY r.ordinal DESC LIMIT 1) END AS status
             FROM orchestration_v2_projection_threads t WHERE archived_at IS NULL AND deleted_at IS NULL \(scope) ORDER BY updated_at DESC,thread_id \(limit)
@@ -38,7 +40,7 @@ enum DesktopSessions {
             data = try query(db.absoluteString+"?immutable=1")
         }
         guard !data.isEmpty else { return [] }
-        struct Row: Decodable { let id: String; let title, rollout_path, status: String? }
+        struct Row: Decodable { let id: String; let title, rollout_path, status, revision: String? }
         let rows = try JSONDecoder().decode([Row].self, from:data)
         var environment = "", version = ""
         if !codex {
@@ -52,14 +54,15 @@ enum DesktopSessions {
                 T3Navigation.url(installedVersion:version,target:Key(environment:environment,thread:row.id))
             guard let url else { return nil }
             let states: [String:SessionLight] = ["attention":.attention,"running":.running,"completed":.done,"interrupted":.ready]
-            return DesktopSession(url:url,title:row.title ?? row.id,light:codex ? rolloutState(row.rollout_path) : states[row.status ?? ""] ?? .unknown)
+            let (light,revision) = codex ? rolloutState(row.rollout_path) : (states[row.status ?? ""] ?? .unknown,row.revision)
+            return DesktopSession(url:url,title:row.title ?? row.id,light:light,completionRevision:revision)
         }
     }
 
-    private static func rolloutState(_ path: String?) -> SessionLight {
-        guard let path, let file = FileHandle(forReadingAtPath:path) else { return .unknown }
+    private static func rolloutState(_ path: String?) -> (SessionLight,String?) {
+        guard let path, let file = FileHandle(forReadingAtPath:path) else { return (.unknown,nil) }
         defer { try? file.close() }
-        guard let end = try? file.seekToEnd() else { return .unknown }
+        guard let end = try? file.seekToEnd() else { return (.unknown,nil) }
         do {
             try file.seek(toOffset:end > 131072 ? end-131072 : 0)
             let data = try file.read(upToCount:131072) ?? Data()
@@ -67,18 +70,18 @@ enum DesktopSessions {
                 guard let event = try? JSONSerialization.jsonObject(with:line) as? [String:Any],event["type"] as? String == "event_msg",
                       let payload = event["payload"] as? [String:Any] else { continue }
                 switch payload["type"] as? String {
-                case "task_complete","turn_complete": return .done
-                case "turn_aborted": return .ready
-                case "task_started","turn_started": return .running
+                case "task_complete","turn_complete": return (.done,event["timestamp"] as? String)
+                case "turn_aborted": return (.ready,nil)
+                case "task_started","turn_started": return (.running,nil)
                 default: continue
                 }
             }
         } catch {}
-        return .unknown
+        return (.unknown,nil)
     }
 
     @MainActor static func open(_ item: DesktopSession, profile: AppProfile) async throws {
-        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier:profile.bundleIDs[0]) else { throw CompanionError(profile.title+" 앱을 찾을 수 없습니다.") }
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier:(profile == .claudeCode ? AppProfile.claude : profile).bundleIDs[0]) else { throw CompanionError(profile.title+" 앱을 찾을 수 없습니다.") }
         if profile == .claude { try ClaudeControls.open(item.url); return }
         _ = try await NSWorkspace.shared.open([item.url], withApplicationAt:app, configuration:.init())
     }

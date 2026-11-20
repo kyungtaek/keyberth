@@ -108,21 +108,23 @@ final class AgentHID {
     private let location: Int
     private var wantedLighting: LightingOutput.Frame?
     private var lastLighting: LightingOutput.Frame?
+    private var nextLightingAttempt = 0.0
     private var lightingBusy = false
     private(set) var lightingStatus = ""
     func retryLighting() { lastLighting = nil }
     private func applyLighting() {
-        guard !lightingBusy, let desired = wantedLighting, desired != lastLighting else { return }
+        guard !lightingBusy, now >= nextLightingAttempt, let desired = wantedLighting, desired != lastLighting else { return }
         lightingBusy = true
         lastLighting = desired
         lightingStatus = "조명 적용 중"
         let location = self.location
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
-            let message: String
-            do { try LightingOutput.apply(desired,location:location); message = "기기에서 조명 설정 수신" }
-            catch { message = error.localizedDescription }
+            let message: String, failed: Bool
+            do { try LightingOutput.apply(desired,location:location); message = "기기에서 조명 설정 수신"; failed = false }
+            catch { message = error.localizedDescription; failed = true }
             DispatchQueue.main.async { [weak self, message] in
                 guard let self, !self.stopped else { return }
+                if failed { self.lastLighting = nil; self.nextLightingAttempt = self.now + 3 }
                 self.lightingBusy = false
                 self.lightingStatus = message
             }
@@ -169,7 +171,7 @@ final class AgentHID {
     }
     func display(_ states: [SessionLight], selected index: Int?, palette:SessionLighting? = nil) {
         guard states.count == 6 else { return }
-        wantedLighting = palette.map { LightingOutput.Frame(palette:$0,states:states,selected:index) }
+        wantedLighting = LightingOutput.Frame(palette:palette ?? .initial,states:states,selected:index,includeAmbient:palette != nil)
         frame = states.map(\.agentCode).joined()
         selected = String(index.map { $0 + 1 } ?? 0)
     }

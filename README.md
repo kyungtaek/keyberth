@@ -34,7 +34,7 @@ bash scripts/package.sh
 | 12 | 현재 터미널의 저장된 대화를 오른쪽 분할에서 포크 |
 | 13 | 활성 터미널에 엔터 |
 
-앱 키맵은 cmux → Slack → Obsidian → T3 Code → Claude Desktop → ChatGPT / Codex 순서로 순환합니다. 노브 회전은 키맵 전환, 클릭은 자동 전환에 고정되며 변경 사항이 HUD에 잠깐 표시됩니다. 자동 전환의 초기값은 끔입니다. 켜면 지원 앱이 전면으로 올 때 그 앱의 키맵이 활성화됩니다. 다른 앱의 포커스는 마지막 키맵을 유지합니다. 터치는 전환에 사용하지 않습니다. cmux 이외의 키맵은 실행 중인 대상 앱에 macOS 키 입력을 보내며, macOS 손쉬운 사용 권한이 필요할 수 있습니다.
+앱 키맵은 cmux → Slack → Obsidian → T3 Code → Claude Desktop → Codex 일반 단축키 → Claude Code 세션 순서로 순환합니다. 노브 회전은 키맵 전환, 클릭은 자동 전환에 고정되며 변경 사항이 HUD에 잠깐 표시됩니다. 자동 전환의 초기값은 끔입니다. 켜면 지원 앱이 전면으로 올 때 그 앱의 키맵이 활성화됩니다. 다른 앱의 포커스는 마지막 키맵을 유지합니다. 터치는 전환에 사용하지 않습니다. cmux 이외의 키맵은 실행 중인 대상 앱에 macOS 키 입력을 보내며, macOS 손쉬운 사용 권한이 필요할 수 있습니다.
 
 **키 매핑**에서 키보드 일러스트의 번호 키와 방향키를 선택해 cmux 동작 또는 터미널 단축키를 배정합니다. **저장**하면 적용되고 **기본값 복원**으로 선택한 컨트롤의 기본 동작을 되살릴 수 있습니다. 8·9번은 대상 요청을 특정할 수 있을 때 동작하고, 12번은 실행 중인 Codex의 경우 패널 TTY의 전경 프로세스가 쓰는 대화 기록에서 ID를 확인하고 cmux 복원 ID를 자동 등록·교정합니다. 자식 패널에서 다시 누르면 그 자식의 대화를 포크합니다. 다른 제공자는 cmux의 저장된 포크 명령을 사용합니다.
 
@@ -70,3 +70,5 @@ Rebuild the Finder demo with `bash scripts/package.sh` (add `--disable-sandbox` 
 
 ## Dormant stock T3 0.1.7 navigation route
 The Swift core can now construct the exact stock v0.1.7 native route from a pair of validated opaque environment/thread IDs. It rejects any other app version and all characters beyond ASCII RFC 3986 unreserved (with dot segments also refused); it does not receive arbitrary URLs, select an app, open URLs, or inspect installed software. The demo is offline and never opens routes. A future live integration must verify the target app bundle and exact version plus supported authentication/state, bind a hardware-confirmed active slot, and verify cold/warm launch and native routing on an isolated synthetic T3 session.
+
+[자동 업데이트 배포 절차](docs/updates.md) · [제조사 앱 호환성 조사](docs/ai-micro-compatibility.md)

@@ -9,6 +9,7 @@ final class LightingOutput {
         let palette: SessionLighting
         let states: [SessionLight]
         let selected: Int?
+        let includeAmbient: Bool
     }
     private var decoder = Readback()
     private var waiting = 0
@@ -41,7 +42,7 @@ final class LightingOutput {
         }
         let firstID=Int.random(in:1...1_000_000_000)
         let commands=try frame.palette.commands(states:frame.states,selected:frame.selected,firstID:firstID)
-        for (index, packets) in commands.enumerated() {
+        for (index, packets) in commands.prefix(frame.includeAmbient ? 2 : 1).enumerated() {
             receiver.waiting=firstID+index
             receiver.accepted=nil
             for packet in packets {

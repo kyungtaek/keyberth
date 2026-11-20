@@ -31,7 +31,7 @@ function binding(id) { return state.mappings[id] || id; }
 const notePrefix = 'obsidian-note:';
 const noteTitle = value => value.slice(notePrefix.length).split('/').pop().replace(/\.md$/i,'');
 const desktopFunctions = [
-  ['cmd+c','복사'],['cmd+v','붙여넣기'],['cmd+x','잘라내기'],['cmd+f','찾기'],['cmd+a','전체 선택'],
+  ['cmd+b','사이드바'],['ctrl+cmd+f','전체 화면'],['cmd+=','글자 확대'],['cmd+-','글자 축소'],['ctrl+shift+tab','이전 대화'],['ctrl+tab','다음 대화'],['backspace','한 글자 삭제'],['cmd+d','Claude 음성'],['cmd+n','새 대화'],['shift+enter','줄바꿈'],['cmd+c','복사'],['cmd+v','붙여넣기'],['cmd+x','잘라내기'],['cmd+f','찾기'],['cmd+a','전체 선택'],
   ['cmd+z','실행 취소'],['cmd+shift+z','다시 실행'],['escape','취소 / 닫기'],['space','공백 입력'],['enter','엔터 입력'],
   ['left','왼쪽 이동'],['right','오른쪽 이동'],['up','위로 이동'],['down','아래로 이동']
 ];
@@ -75,13 +75,13 @@ function build() {
   $('board').append(dial,key(1),key(2),joy);
   for (let n=3;n<=13;n++) { if(n===11) $('board').append(group('indicator')); $('board').append(key(n)); }
   $('base').add(new Option('키 선택',''));
-  for (const [label, keys] of [['특수 키',catalog.special],['문자·숫자',[...'abcdefghijklmnopqrstuvwxyz0123456789']]]) {
+  for (const [label, keys] of [['특수 키',catalog.special],['문자·숫자·기호',[...'abcdefghijklmnopqrstuvwxyz0123456789=-[]']]]) {
     const g=document.createElement('optgroup'); g.label=label;
     for(const k of keys) g.append(new Option(k.toUpperCase(),k));
     $('base').append(g);
   }
-  for(const m of ['cmd', ...catalog.modifiers]) {
-    const b=button({cmd:'⌘ Cmd',ctrl:'⌃ Ctrl',alt:'⌥ Alt',shift:'⇧ Shift'}[m],'',()=>{
+  for(const m of catalog.modifiers) {
+    const b=button({cmd:'⌘ Command',ctrl:'⌃ Control',alt:'⌥ Option',shift:'⇧ Shift'}[m],'',()=>{
       const d=draft(); d.mods=d.mods.includes(m)?d.mods.filter(v=>v!==m):[...d.mods,m]; renderMapping();
     });
     b.dataset.mod=m; $('mods').append(b);
@@ -122,7 +122,7 @@ function buildFunctions(profile) {
 }
 function fromBinding(value) {
   const note=value.startsWith(notePrefix), action=availableFunctions.has(value);
-  const parts=note||action?[]:value.split('+');
+  const parts=note || !/^(?:(?:cmd|ctrl|alt|shift)\+)*(?:[a-z0-9=\-\[\]]+)$/.test(value) ? [] : value.split('+');
   return {mode:note?'note':action?'action':'chord',action:action?value:(state.profile==='cmux'?selected:'none'),
     note:note?value:'',base:parts.pop()||'',mods:parts};
 
@@ -142,8 +142,11 @@ function renderMapping() {
       const icon = actionIcons[assigned] || (byId.has(assigned) ? 'session' : 'shortcut');
       b.querySelector('img').setAttribute('src', 'assets/' + icon + '.svg');
       b.querySelector('.capLabel').textContent = actionText(assigned);
-      if (assigned.startsWith('recent.')) {
-        const slot=state.slots[Number(assigned.slice(7))-1];
+      const slotBinding = /^(?:recent\.([1-6])|slack\.K0([1-6]))$/.exec(assigned);
+      const cmuxSlot = state.profile==='cmux' && /^K0[1-6]$/.test(assigned);
+      if (slotBinding || cmuxSlot) {
+        const index=cmuxSlot ? Number(assigned.slice(1)) : Number(slotBinding[1] || slotBinding[2]);
+        const slot=state.slots[index-1];
         if(slot?.target) {
           b.querySelector('.capLabel').textContent=slot.title;
           b.title+=' · '+slot.title+' · '+slot.state;
@@ -159,7 +162,7 @@ function renderMapping() {
   $('keyId').textContent=selected;$('current').textContent=actionText(saved);
   const locked = !!fixed[selected], desktop = state.profile !== 'cmux';
   $('actionMode').parentElement.hidden=locked;
-  $('current').textContent=locked ? fixed[selected] : actionText(saved);
+  $('current').textContent=locked ? (fixed[selected] || actionText(saved)) : actionText(saved);
   $('noteMode').hidden=!(state.profile==='obsidian' && /^K0[1-6]$/.test(selected));
   $('noteFields').hidden=locked || d.mode!=='note';
   if(locked){
@@ -182,15 +185,45 @@ function renderMapping() {
     choice.setAttribute('aria-pressed', String(choice.dataset.id === d.action));
   }
   $('base').value=d.base;
-  for(const b of $('mods').children) { b.hidden=b.dataset.mod==='cmd'&&!desktop; b.setAttribute('aria-pressed',String(d.mods.includes(b.dataset.mod))); }
-  const combination=[...['cmd',...catalog.modifiers].filter(m=>d.mods.includes(m)),d.base].join('+');
+  for(const b of $('mods').children) { b.setAttribute('aria-pressed',String(d.mods.includes(b.dataset.mod))); }
+  const combination=[...catalog.modifiers.filter(m=>d.mods.includes(m)),d.base].join('+');
   const valid=d.base && (desktop || catalog.special.includes(d.base)||d.mods.length);
   $('chord').textContent=!d.base?'':valid?combination:'문자·숫자에는 보조 키를 선택하세요.';
   const value=chord?combination:d.mode==='note'?d.note:d.action;
   $('save').disabled=!value || value===saved || (chord && !valid);$('save').dataset.value=value;
   $('restore').disabled=value===state.defaults[selected];
 }
+let claudeSignature = '';
+function renderClaudeOptions(next) {
+  const visible = !popup && next.profile === 'claudeCode';
+  $('claudeSlots').hidden = !visible;
+  const options = next.claudeOptions;
+  const signature = visible ? JSON.stringify(options) : '';
+  if (signature === claudeSignature) return;
+  claudeSignature = signature;
+  const fields = $('claudeSlotFields');
+  fields.replaceChildren();
+  if (!visible) return;
+  function select(label, input, current, choices, initial) {
+    const row = document.createElement('label'), menu = document.createElement('select');
+    row.textContent = label;
+    menu.add(new Option(initial,''));
+    for (const choice of choices) menu.add(new Option(choice.name,choice.id));
+    if (current && !choices.some(x=>x.id === current)) menu.add(new Option('사용할 수 없음',current));
+    menu.value = current || '';
+    menu.onchange = async () => {
+      try { renderState(await api('configureClaude',{input,binding:menu.value})); }
+      catch(error){claudeSignature='';renderClaudeOptions(state);fail(error);}
+    };
+    row.append(menu);fields.append(row);
+  }
+  select('세션 소스','source',options.source,options.sources.map(id=>({id,name:id})), '전체');
+  for(let i=1;i<=6;i++) select('슬롯 '+i,String(i),options.pins[String(i)],options.choices,'최근 활동순');
+  if(options.requests.length) select('선택한 세션의 권한 요청','request',options.request,
+    options.requests.map(x=>({...x,name:x.name+' · '+x.id.split('.')[1].slice(0,8)})), '단일 요청 자동 선택');
+}
 function renderState(next) {
+  renderClaudeOptions(next);
   const mappingsChanged = !state || JSON.stringify(next.slots)!==JSON.stringify(state.slots) || next.profile!==state.profile || JSON.stringify(state.mappings) !== JSON.stringify(next.mappings);
   if(state?.profile!==next.profile) {categoryOverride='';buildFunctions(next.profile);}
   state=next; $('profile').value=next.profile; $('activeName').textContent=catalog.profiles.find(p=>p.id===next.profile).name;
@@ -307,5 +340,16 @@ document.addEventListener('keydown',e=>{if(e.metaKey&&e.key==='s'){e.preventDefa
 $('volume').oninput=$('sleep').oninput=updatePrefsButtons;
 $('readPrefs').onclick=()=>device(false);$('savePrefs').onclick=()=>device(true);
 $('connect').onclick=()=>api('connect').catch(fail);
+for(const method of ['installClaudeHooks','removeClaudeHooks']) $(method).onclick=async()=>{try{await api(method);announce(method==='installClaudeHooks'?'Claude Code 훅을 연결했습니다. 새 세션부터 적용됩니다.':'Claude Code 훅을 해제했습니다.');}catch(error){fail(error);}};
+for(const action of ['importMaps','exportMaps']) {
+  $(action).onclick=async()=>{
+    try {
+      const result=await api(action);
+      if(!result)return;
+      if(action==='importMaps'){drafts.clear();renderState(result);renderMapping();}
+      announce(action==='importMaps'?'키맵을 가져왔습니다.':'키맵 파일을 저장했습니다.');
+    }catch(error){fail(error);}
+  };
+}
 window.keyberth.onView(show);
 (async()=>{catalog=await api('catalog');build();await poll();show(view);setInterval(()=>{if(!document.hidden)poll();},900);document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});})().catch(fail);
