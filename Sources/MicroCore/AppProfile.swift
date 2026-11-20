@@ -64,6 +64,8 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
         if self == .claudeCode {
             entries.merge(["agent.approve":"이번 요청 승인", "agent.decline":"요청 거절"]) { _, new in new }
         } else if self == .t3 {
+            entries["agent.decline"] = "요청 거부"
+            entries["agent.nextPending"] = "다음 입력 대기 세션"
             for entry in Self.t3Controls { entries[entry.action] = entry.label }
         } else {
             entries.merge(["agent.fast": self == .claude ? "모델 · 사고 수준 선택" : "Fast 모드 전환",
@@ -77,9 +79,9 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
 
     private static let t3Controls: [(input:String, action:String, label:String)] = [
         ("JOY_DOWN","agent.terminal","터미널 열기/닫기"), ("JOY_RIGHT","agent.rightPanel","오른쪽 사이드 패널 열기/닫기"),
-        ("K07","agent.nextPending","다음 입력 대기 세션"), ("K08","agent.approve","이번 요청 승인"),
-        ("K09","agent.decline","요청 거부"), ("K10","agent.fork","현재 세션 포크"),
-        ("K11","agent.dictate","누르고 받아쓰기"), ("K12","agent.newChat","새 대화"), ("K13","agent.submit","보내기")
+        ("K07","agent.newChat","새 대화"), ("K08","agent.approve","이번 요청 승인"),
+        ("K09","agent.settle","현재 세션 정리"), ("K10","agent.fork","현재 세션 포크"),
+        ("K11","agent.dictate","누르고 받아쓰기"), ("K12","agent.stop","현재 진행 중단"), ("K13","agent.submit","보내기")
     ]
 
     public func defaultBinding(_ input: String) -> String {

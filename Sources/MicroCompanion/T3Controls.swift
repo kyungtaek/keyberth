@@ -178,6 +178,17 @@ import MicroCore
             }
             guard let fork=ctx.buttons(["Fork from this response"]).last else { throw CompanionError("포크할 수 있는 응답이 없습니다.") }
             try fork.press()
+        case "agent.settle":
+            let ctx = try Context()
+            guard let route = ctx.route else { throw CompanionError("현재 T3 대화를 확인할 수 없습니다.") }
+            guard try DesktopSessions.t3NeedsSettlement(route:route) else { return }
+            try ctx.focusComposer()
+            guard stillActive(), ctx.route == route else { throw CompanionError("T3 세션이 변경됐습니다.") }
+            try DesktopShortcut.send(chord("thread.settle",default:"cmd+shift+s"),to:.t3)
+        case "agent.stop":
+            let buttons = try Context().buttons(["Stop generation"])
+            guard buttons.count == 1 else { throw CompanionError("현재 대화에서 중단할 응답을 확인할 수 없습니다.") }
+            try buttons[0].press()
         case "agent.submit":
             let buttons=try Context().buttons(["Submit message","Queue message","Steer message","Compact and send","Update queued message"])
             guard buttons.count == 1 else { throw CompanionError("보낼 수 있는 T3 메시지가 없습니다.") }

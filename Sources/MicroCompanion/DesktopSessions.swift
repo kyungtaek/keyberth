@@ -77,6 +77,30 @@ enum DesktopSessions {
         }
     }
 
+    // T3's shortcut toggles settlement. Check the exact local thread first so
+    // pressing the key on a settled chat cannot reopen it.
+    static func t3NeedsSettlement(route:URL, home:URL = FileManager.default.homeDirectoryForCurrentUser) throws -> Bool {
+        let directory = home.appendingPathComponent(".t3/userdata")
+        let environment = try String(contentsOf:directory.appendingPathComponent("environment-id")).trimmingCharacters(in:.whitespacesAndNewlines)
+        let path = route.fragment?.components(separatedBy:"?").first ?? route.path
+        let parts = path.split(separator:"/")
+        guard parts.count == 2, parts[0] == environment, let thread = UUID(uuidString:String(parts[1])) else {
+            throw CompanionError("현재 로컬 T3 세션을 확인할 수 없습니다.")
+        }
+        let sql = """
+            SELECT CASE WHEN json_extract(payload_json,'$.settledOverride')='settled'
+                OR json_extract(payload_json,'$.settledAt') IS NOT NULL THEN 0 ELSE 1 END
+            FROM orchestration_v2_projection_threads
+            WHERE thread_id='\(thread.uuidString.lowercased())' AND archived_at IS NULL AND deleted_at IS NULL
+            """
+        let data = try CmuxClient.run(["-readonly",directory.appendingPathComponent("statev2.sqlite").path,sql],executable:"/usr/bin/sqlite3")
+        switch String(decoding:data,as:UTF8.self).trimmingCharacters(in:.whitespacesAndNewlines) {
+        case "0": return false
+        case "1": return true
+        default: throw CompanionError("정리할 T3 세션을 찾을 수 없습니다.")
+        }
+    }
+
     static func latestCodexTurns(_ ids:[UUID], home:URL) -> [String:(SessionLight,String?)] {
         guard !ids.isEmpty else { return [:] }
         let db = home.appendingPathComponent(".codex/thread_history_1.sqlite")

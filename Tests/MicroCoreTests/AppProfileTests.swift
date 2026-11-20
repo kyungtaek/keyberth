@@ -63,7 +63,9 @@ final class AppProfileTests: XCTestCase {
     func testT3PanelAndConversationBindings() {
         let inputs = ["JOY_DOWN","JOY_RIGHT","K07","K08","K09","K10","K11","K12","K13"]
         let actions = inputs.map { AppProfile.t3.defaultBinding($0) }
-        XCTAssertEqual(actions, ["agent.terminal","agent.rightPanel","agent.nextPending","agent.approve","agent.decline","agent.fork","agent.dictate","agent.newChat","agent.submit"])
+        XCTAssertEqual(actions, ["agent.terminal","agent.rightPanel","agent.newChat","agent.approve","agent.settle","agent.fork","agent.dictate","agent.stop","agent.submit"])
+        XCTAssertNotNil(AppProfile.t3.agentActions["agent.decline"])
+        XCTAssertNotNil(AppProfile.t3.agentActions["agent.nextPending"])
         XCTAssertTrue(actions.allSatisfy { AppProfile.t3.agentActions[$0] != nil })
         XCTAssertEqual(AppProfile.t3.defaultBinding("JOY_UP"),"up")
         XCTAssertEqual(AppProfile.t3.defaultBinding("JOY_LEFT"),"left")
