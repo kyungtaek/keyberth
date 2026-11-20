@@ -126,7 +126,7 @@ enum DesktopSessions {
         return result
     }
 
-    private static func rolloutState(_ path: String?) -> (SessionLight,String?) {
+    static func rolloutState(_ path: String?) -> (SessionLight,String?) {
         guard let path, let file = FileHandle(forReadingAtPath:path) else { return (.unknown,nil) }
         defer { try? file.close() }
         guard let end = try? file.seekToEnd() else { return (.unknown,nil) }
@@ -137,7 +137,7 @@ enum DesktopSessions {
                 guard let event = try? JSONSerialization.jsonObject(with:line) as? [String:Any],event["type"] as? String == "event_msg",
                       let payload = event["payload"] as? [String:Any] else { continue }
                 switch payload["type"] as? String {
-                case "task_complete","turn_complete": return (.done,event["timestamp"] as? String)
+                case "task_complete","turn_complete": return (.done,payload["turn_id"] as? String)
                 case "turn_aborted": return (.ready,nil)
                 case "task_started","turn_started": return (.running,nil)
                 default: continue

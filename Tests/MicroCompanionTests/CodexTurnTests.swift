@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import MicroCore
 @testable import MicroCompanion
 
 final class CodexTurnTests: XCTestCase {
@@ -25,5 +26,16 @@ final class CodexTurnTests: XCTestCase {
         let final = DesktopSessions.latestCodexTurns([thread],home:home)
         XCTAssertEqual(final[id]?.0,.done)
         XCTAssertEqual(final[id]?.1,"current")
+        let rollout = directory.appendingPathComponent("session.jsonl")
+        try Data(#"{"timestamp":"later","type":"event_msg","payload":{"type":"task_complete","turn_id":"current"}}"#.utf8).write(to:rollout)
+        let fallback = DesktopSessions.rolloutState(rollout.path)
+        XCTAssertEqual(fallback.1, final[id]?.1)
+        var indicator = CompletionIndicator()
+        XCTAssertEqual(indicator.display(.done,id:id,revision:final[id]?.1), .ready)
+        XCTAssertEqual(indicator.display(fallback.0,id:id,revision:fallback.1), .ready)
+        XCTAssertEqual(indicator.display(.unknown,id:id), .unknown)
+        XCTAssertEqual(indicator.display(.done,id:id), .ready)
+        XCTAssertEqual(indicator.display(.done,id:id,revision:final[id]?.1), .ready)
+        XCTAssertEqual(indicator.display(.done,id:id,revision:"next"), .done)
     }
 }
