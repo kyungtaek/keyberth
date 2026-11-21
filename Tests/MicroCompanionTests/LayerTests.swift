@@ -4,14 +4,10 @@ import MicroCore
 
 final class LayerTests:XCTestCase {
     func testGlobalInheritanceAndExplicitAppOverrides() {
-        for p in AppProfile.allCases {
-            XCTAssertNil(KeyMap.localBinding("K01",profile:p,saved:nil,global:nil))
-            XCTAssertNil(KeyMap.localBinding("K12",profile:p,saved:nil,global:"system.missionControl"))
-            XCTAssertNil(KeyMap.localBinding("K12",profile:p,saved:"inherit",global:nil))
-            XCTAssertEqual(KeyMap.localBinding("K12",profile:p,saved:"none",global:"system.missionControl"),"none")
-        }
-        XCTAssertEqual(KeyMap.localBinding("K12",profile:.codex,saved:nil,global:nil),"agent.newChat")
-        XCTAssertEqual(KeyMap.localBinding("K12",profile:.t3,saved:"agent.stop",global:"system.missionControl"),"agent.stop")
+        XCTAssertNil(KeyMap.localBinding(nil))
+        XCTAssertNil(KeyMap.localBinding("inherit"))
+        XCTAssertEqual(KeyMap.localBinding("none"),"none")
+        XCTAssertEqual(KeyMap.localBinding("agent.stop"),"agent.stop")
     }
 
     func testSharedBindingsArchive() throws {

@@ -29,11 +29,8 @@ enum KeyMap {
     static func label(_ binding: String) -> String {
         controls.firstIndex(of: binding).map { actions[$0] } ?? binding
     }
-    static func localBinding(_ key:String,profile:AppProfile,saved:String?,global:String?) -> String? {
-        if let saved { return saved == "inherit" ? nil : saved }
-        if global != nil || keys.prefix(6).contains(key) { return nil }
-        let preset=profile.defaultBinding(key)
-        return preset == "none" ? nil : preset
+    static func localBinding(_ saved:String?) -> String? {
+        saved == "inherit" ? nil : saved
     }
     static func load() -> [String:String] {
         let defaults = preferences

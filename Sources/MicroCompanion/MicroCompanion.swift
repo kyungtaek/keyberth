@@ -48,7 +48,7 @@ import MicroCore
     }
     private var profileList:[[String:String]] { enabled.map { ["id":$0.rawValue,"name":title($0)] } }
     private func storeEnabled() { KeyMap.preferences.set(enabled.map(\.rawValue),forKey:"enabledAppProfiles") }
-    private var automatic = KeyMap.preferences.bool(forKey: "automaticKeyMap")
+    private var automatic = (KeyMap.preferences.object(forKey:"automaticKeyMap") as? Bool) ?? true
     private var focusObserver: NSObjectProtocol?
     var feedback = ""
 
@@ -116,7 +116,7 @@ import MicroCore
         return "allRecent."+String(index+1)
     }
     private func localValue(_ key:String, _ p:AppProfile) -> String? {
-        KeyMap.localBinding(key,profile:p,saved:p == .cmux ? cmuxMappings[key] : profiles[p.rawValue]?[key],global:global[key])
+        KeyMap.localBinding(p == .cmux ? cmuxMappings[key] : profiles[p.rawValue]?[key])
     }
     private func binding(_ key:String, in p:AppProfile) -> String {
         localValue(key,p) ?? global[key] ?? globalDefault(key)
@@ -703,7 +703,7 @@ import MicroCore
         return ["profiles":profileList, "claudeOptions":claudeOptions(), "lightingStatus": lightStatus.isEmpty ? "USB 연결 대기" : lightStatus, "slots": slots, "usb": deviceStatus, "cmux": profile.hasRecentSessions ? sessionStatus : (profile == .cmux ? cmuxStatus : profile.title), "feedback": feedback,
                 "profile": profile.rawValue, "automatic":automatic,
                 "globalMappings":Dictionary(uniqueKeysWithValues:KeyMap.controls.map { ($0,global[$0] ?? globalDefault($0)) }),
-                "explicitGlobal":Array(global.keys).sorted(),
+                "explicitGlobal":Array(global.keys).sorted(), "appOverrides":exportMaps,
                 "explicitLocal":(profile == .cmux ? cmuxMappings : profiles[profile.rawValue] ?? [:]).filter { $0.value != "inherit" }.keys.sorted(),
                 "localKeys":KeyMap.controls.filter { localValue($0,profile) != nil },
                 "combinedSlots":combined.map { combinedRow($0) },
@@ -799,16 +799,19 @@ import MicroCore
                 result["value"] = MacActions.favorites
             case "catalog":
                 result["value"] = ["profiles": profileList, "templates":AppProfile.allCases.map { ["id":$0.rawValue,"name":$0.title] }, "controls": KeyMap.controls.map { ["id": $0, "name": KeyMap.name($0), "action": KeyMap.label($0)] },
-                                   "agentActions": Dictionary(uniqueKeysWithValues: AppProfile.allCases.map { ($0.rawValue,$0.agentActions) }), "systemActions":MacActions.system, "favorites":MacActions.favorites, "slackActions": zip(SlackAction.inputs,SlackAction.labels).map { ["id":"slack."+$0.0,"name":$0.1] }, "modifiers": FunctionKey.modifiers, "special": FunctionKey.specialKeys] as [String: Any]
+                                   "appDefaults":Dictionary(uniqueKeysWithValues:AppProfile.allCases.map { p in (p.rawValue,Dictionary(uniqueKeysWithValues:KeyMap.controls.map { ($0,p.defaultBinding($0)) })) }), "agentActions": Dictionary(uniqueKeysWithValues: AppProfile.allCases.map { ($0.rawValue,$0.agentActions) }), "systemActions":MacActions.system, "favorites":MacActions.favorites, "slackActions": zip(SlackAction.inputs,SlackAction.labels).map { ["id":"slack."+$0.0,"name":$0.1] }, "modifiers": FunctionKey.modifiers, "special": FunctionKey.specialKeys] as [String: Any]
             case "addProfile":
                 let next:AppProfile
                 if let path=r.target, path.hasSuffix(".app"), let id=Bundle(url:URL(fileURLWithPath:path))?.bundleIdentifier {
                     guard let app=AppProfile(rawValue:"app."+id) else { throw CompanionError("앱 식별자를 확인하세요.") }
                     next = AppProfile.allCases.first(where:{$0.bundleIDs.contains(id)}) ?? app
                 } else if let id=r.profile, let p=AppProfile(rawValue:id), AppProfile.allCases.contains(p) {next=p}
+                else if let id=r.profile, MacActions.runningApps()[id] != nil, let app=AppProfile(rawValue:"app."+id) {
+                    next=AppProfile.allCases.first(where:{$0.bundleIDs.contains(id)}) ?? app
+                }
                 else {throw CompanionError("앱을 선택하세요.")}
                 if !enabled.contains(next) {enabled.append(next);storeEnabled()}
-                activate(next);result["value"]=state()
+                var response=state();response["addedProfile"]=next.rawValue;result["value"]=response
             case "removeProfile":
                 guard let id=r.profile, let p=AppProfile(rawValue:id), enabled.contains(p) else {throw CompanionError("키맵을 확인하세요.")}
                 enabled.removeAll{$0==p}
@@ -821,7 +824,7 @@ import MicroCore
                 }
                 storeEnabled()
                 KeyMap.preferences.set(exportMaps,forKey:"keymapOverridesV1")
-                if profile==p {activate(enabled.first ?? .unconfigured)}
+                if profile==p {activate(.unconfigured)}
                 result["value"]=state()
             case "activateProfile":
                 guard let id = r.profile, let next = AppProfile(rawValue:id), (enabled.contains(next) || next == .unconfigured) else { throw CompanionError("알 수 없는 키맵") }

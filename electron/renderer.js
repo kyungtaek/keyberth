@@ -49,8 +49,11 @@ function syncPicker(select,container) {
   }
 }
 function globalEdit() { return $('scope').value==='global'; }
-function draftKey() { return (globalEdit()?'global':state.profile) + '/' + selected; }
-function binding(id) { return (globalEdit()?state.globalMappings:state.mappings)?.[id] || id; }
+let editProfile='';
+function overrides(){return state?.appOverrides?.[editProfile] || {};}
+function hasOverride(id){return Object.hasOwn(overrides(),id) && overrides()[id]!=='inherit';}
+function draftKey() { return (globalEdit()?'global':editProfile) + '/' + selected; }
+function binding(id) { return !globalEdit() && hasOverride(id) ? overrides()[id] : state.globalMappings?.[id] || 'none'; }
 const notePrefix = 'obsidian-note:';
 const noteTitle = value => value.slice(notePrefix.length).split('/').pop().replace(/\.md$/i,'');
 const desktopFunctions = [
@@ -74,7 +77,7 @@ async function readMenus(profile) {
   try {
     const menus = await api('appMenus',{profile});
     appMenus.set(profile,menus);
-    if (state?.profile===profile) { buildFunctions(profile); renderMapping(); }
+    if (!globalEdit() && editProfile===profile) { buildFunctions(profile); renderMapping(); }
   } catch(error) { fail(error); }
 }
 function fillFavoritePicker() {
@@ -95,9 +98,9 @@ async function refreshFavoritePicker() {
   try {runningApps=await api('runningApps');fillFavoritePicker();} catch(error) {fail(error);}
 }
 
-function actionText(value) {
+function actionText(value,profile=editProfile) {
   if(value.startsWith(notePrefix)) return noteTitle(value);
-  return availableFunctions.get(value) || storedActionLabel(value) || (state.profile==='cmux' && byId.get(value)?.action) || '사용자 단축키';
+  return catalog.agentActions[profile]?.[value] || availableFunctions.get(value) || storedActionLabel(value) || (profile==='cmux' && byId.get(value)?.action) || '사용자 단축키';
 }
 const actionIcons = {
   K07: 'workspace', K08: 'approve', K09: 'deny', K10: 'sidebar',
@@ -161,7 +164,7 @@ function build() {
     b.append(num,document.createElement('b'),document.createElement('small'));$('slots').append(b);slotButtons.push(b);
   }
 }
-function buildFunctions(profile,currentMappings=state?.mappings||{}) {
+function buildFunctions(profile,currentMappings={...state?.globalMappings,...overrides()}) {
   let groups;
   if(profile==='cmux') {
     groups=[
@@ -211,7 +214,7 @@ function buildFunctions(profile,currentMappings=state?.mappings||{}) {
 function fromBinding(value) {
   const note=value.startsWith(notePrefix), action=availableFunctions.has(value);
   const parts=note || !/^(?:(?:cmd|ctrl|alt|shift)\+)*(?:[a-z0-9=\-\[\]]+)$/.test(value) ? [] : value.split('+');
-  return {mode:note?'note':action?'action':'chord',action:action?value:(state.profile==='cmux'?selected:'none'),
+  return {mode:note?'note':action?'action':'chord',action:action?value:(editProfile==='cmux'?selected:'none'),
     note:note?value:'',base:parts.pop()||'',mods:parts};
 
 }
@@ -219,22 +222,24 @@ function draft() {
   if(!drafts.has(draftKey())) drafts.set(draftKey(),fromBinding(binding(selected)));
   return drafts.get(draftKey());
 }
-function defaultForKey() {return globalEdit()?(/^K0[1-6]$/.test(selected)?'allRecent.'+Number(selected.slice(1)):'none'):state.defaults[selected];}
+function defaultForKey() {return globalEdit()?(/^K0[1-6]$/.test(selected)?'allRecent.'+Number(selected.slice(1)):'none'):catalog.appDefaults?.[editProfile]?.[selected] || 'none';}
 function renderMapping() {
   const saved=binding(selected), d=drafts.get(draftKey())||fromBinding(saved);
   for(const [id,b] of buttons) {
-    const title=byId.get(id).name+' · '+actionText(binding(id));
+    const boardProfile=view==='mapping'?editProfile:state.profile;
+    const assigned=view==='mapping'?binding(id):state.mappings[id] || 'none';
+    const title=byId.get(id).name+' · '+actionText(assigned,boardProfile);
+    b.toggleAttribute('data-override',view==='mapping' && !globalEdit() && hasOverride(id));
     b.title=title; b.setAttribute('aria-label',title);b.setAttribute('aria-pressed',String(id===selected));
     if (id.startsWith('K')) {
-      const assigned = view==='mapping' ? binding(id) : state.mappings[id];
       b.style.removeProperty('--session-color');
       delete b.dataset.session;
       const icon = actionIcons[assigned] || (byId.has(assigned) ? 'session' : 'shortcut');
       b.querySelector('img').setAttribute('src', 'assets/' + icon + '.svg');
-      b.querySelector('.capLabel').textContent = actionText(assigned);
+      b.querySelector('.capLabel').textContent = actionText(assigned,boardProfile);
       const shared=/^allRecent\.([1-6])$/.exec(assigned);
       const slotBinding = /^(?:recent\.([1-6])|slack\.K0([1-6]))$/.exec(assigned);
-      const cmuxSlot = state.profile==='cmux' && /^K0[1-6]$/.test(assigned);
+      const cmuxSlot = boardProfile==='cmux' && /^K0[1-6]$/.test(assigned);
       if (shared || slotBinding || cmuxSlot) {
         const index=shared ? Number(shared[1]) : cmuxSlot ? Number(assigned.slice(1)) : Number(slotBinding[1] || slotBinding[2]);
         const slot=(shared ? state.combinedSlots : state.slots)?.[index-1];
@@ -253,16 +258,17 @@ function renderMapping() {
   }
   $('keyTitle').textContent=selected.startsWith('K')?Number(selected.slice(1))+'번 키':byId.get(selected).name;
   $('keyId').textContent=selected;$('current').textContent=actionText(saved);
-  const desktop = globalEdit() || state.profile !== 'cmux';
-  $('scope').disabled=state.profile==='unconfigured';
+  const desktop = globalEdit() || editProfile !== 'cmux';
+  $('appEditor').hidden=globalEdit();
+  $('overrideCount').textContent=editProfile ? '예외 키 '+Object.keys(overrides()).filter(hasOverride).length+'개' : '';
   $('inherit').hidden=globalEdit();
-  $('inherit').disabled=!state.localKeys?.includes(selected);
-  $('current').previousElementSibling.textContent=globalEdit()?'글로벌 배정':state.localKeys?.includes(selected)?'앱 배정':'글로벌에서 상속';
+  $('inherit').disabled=!hasOverride(selected);
+  $('current').previousElementSibling.textContent=globalEdit()?'글로벌 배정':hasOverride(selected)?'앱 배정':'글로벌에서 상속';
 
   $('current').textContent=actionText(saved);
-  $('noteMode').hidden=!( !globalEdit() && state.profile==='obsidian' && /^K0[1-6]$/.test(selected));
+  $('noteMode').hidden=!( !globalEdit() && editProfile==='obsidian' && /^K0[1-6]$/.test(selected));
   $('noteFields').hidden=d.mode!=='note';
-  $('reloadMenus').hidden=globalEdit() || !menuProfiles.has(state.profile);
+  $('reloadMenus').hidden=globalEdit() || !menuProfiles.has(editProfile);
   $('actionMode').textContent='기능';
   $('noteTitle').textContent=d.note?noteTitle(d.note):'문서를 선택하세요';
   $('noteTitle').title=d.note?.slice(notePrefix.length)||'';
@@ -289,7 +295,7 @@ function renderMapping() {
   const valid=d.base && (desktop || catalog.special.includes(d.base)||d.mods.length);
   $('chord').textContent=!d.base?'':valid?combination:'문자·숫자에는 보조 키를 선택하세요.';
   const value=chord?combination:d.mode==='note'?d.note:d.action;
-  $('save').disabled=!value || (value===saved && (globalEdit()?state.explicitGlobal:state.explicitLocal)?.includes(selected)) || (chord && !valid);$('save').dataset.value=value;
+  $('save').disabled=(!globalEdit() && !editProfile) || !value || (value===saved && (globalEdit()?state.explicitGlobal?.includes(selected):hasOverride(selected))) || (chord && !valid);$('save').dataset.value=value;
   $('restore').disabled=value===defaultForKey();
   renderPreview();
 }
@@ -325,19 +331,18 @@ function renderClaudeOptions(next) {
 function renderState(next) {
   renderClaudeOptions(next);
   const mappingsChanged = !state || JSON.stringify([next.globalMappings,next.localKeys,next.explicitGlobal,next.explicitLocal,next.combinedSlots])!==JSON.stringify([state.globalMappings,state.localKeys,state.explicitGlobal,state.explicitLocal,state.combinedSlots]) || JSON.stringify(next.slots)!==JSON.stringify(state.slots) || next.profile!==state.profile || JSON.stringify(state.mappings) !== JSON.stringify(next.mappings);
-  if(next.profile==='unconfigured') $('scope').value='global';
-  if(state?.profile!==next.profile) {categoryOverride='';$('functionSearch').value='';buildFunctions(next.profile,next.mappings);readMenus(next.profile);}
-  if (!state || JSON.stringify(state.profiles)!==JSON.stringify(next.profiles)) {
-    $('profile').replaceChildren(...next.profiles.map(p=>new Option(p.name,p.id)));
-    $('profile').add(new Option('글로벌','unconfigured'));
-    buildPicker($('profile'),$('profilesBar'));
+  const profilesChanged=!state || JSON.stringify(state.profiles)!==JSON.stringify(next.profiles);
+  const assignmentsChanged=!state || JSON.stringify(state.appOverrides)!==JSON.stringify(next.appOverrides);
+  if (profilesChanged) {
+    if(!next.profiles.some(p=>p.id===editProfile))editProfile='';
     const present=new Set(next.profiles.map(p=>p.id));
     $('manageProfile').replaceChildren(new Option('응용 프로그램 선택…',''),...next.profiles.map(p=>new Option(p.name,p.id)),
       ...catalog.templates.filter(p=>!present.has(p.id)).map(p=>new Option(p.name+' (추가 가능)',p.id)));
     $('manageProfile').value=next.profiles.find(p=>p.id===next.profile)?.id || '';
   }
-  state=next; $('profile').value=next.profile; $('activeName').textContent=next.profiles.find(p=>p.id===next.profile)?.name || '글로벌';
-  syncPicker($('profile'),$('profilesBar'));
+  state=next; if(profilesChanged) fillProcesses();
+  if(profilesChanged || assignmentsChanged)buildFunctions(editProfile);
+  $('activeName').textContent=next.profiles.find(p=>p.id===next.profile)?.name || '글로벌';
   $('manageProfile').onchange();
   $('auto').textContent='자동 전환 '+(next.automatic?'켬':'끔'); $('auto').setAttribute('aria-pressed',String(next.automatic));
   $('usb').textContent=next.usb;$('cmux').textContent=next.cmux;
@@ -358,7 +363,7 @@ function renderState(next) {
     b.children[0].classList.toggle('coloredSlot',!!s.lightColor);
     b.children[0].style.setProperty('--slot-dot',s.lightColor || 'transparent');
   }
-  if(mappingsChanged) renderMapping();
+  if(mappingsChanged || profilesChanged || assignmentsChanged) renderMapping();
 }
 async function poll() {
   if(polling||!catalog)return;polling=true;
@@ -460,7 +465,31 @@ async function device(save){
   }catch(e){prefs=null;$('buzzer').textContent=e.message;}
   finally{prefsBusy=false;updatePrefsButtons();}
 }
-$('profile').onchange=async e=>{try{renderState(await api('activateProfile',{profile:e.target.value}));}catch(err){fail(err);}};
+function fillProcesses(){
+  const picker=$('profile');picker.replaceChildren(new Option('프로세스 선택…',''));
+  const registered=document.createElement('optgroup');registered.label='등록된 앱';
+  for(const p of state.profiles) registered.append(new Option(p.name,p.id));
+  picker.append(registered);
+  const running=document.createElement('optgroup');running.label='실행 중인 프로세스';
+  for(const [id,name] of Object.entries(runningApps).sort((a,b)=>a[1].localeCompare(b[1]))) {
+    if(!state.profiles.some(p=>p.id==='app.'+id))running.append(new Option(name,'running:'+id));
+  }
+  picker.append(running,new Option('응용 프로그램 파일 선택…','browse'));picker.value=editProfile;
+}
+function updateEditor(){
+  categoryOverride='';$('functionSearch').value='';buildFunctions(editProfile);renderMapping();
+  if(!globalEdit() && editProfile)readMenus(editProfile);
+}
+$('profile').onchange=async e=>{
+  const value=e.target.value;
+  try{
+    if(value==='browse'||value.startsWith('running:')){
+      const result=await api('addProfile',value==='browse'?{}:{profile:value.slice(8)});
+      if(result){editProfile=result.addedProfile;renderState(result);}
+    }else editProfile=value;
+    fillProcesses();updateEditor();
+  }catch(error){fillProcesses();fail(error);}
+};
 $('auto').onclick=async()=>{try{renderState(await api('toggleAuto'));}catch(err){fail(err);}};
 function settingsPanel(id) {
   for (const tab of document.querySelectorAll('[data-panel]')) {
@@ -474,6 +503,7 @@ for(const tab of document.querySelectorAll('[data-panel]')) tab.onclick=()=>sett
 settingsPanel('hardware');
 function show(name){
   view=name;
+  document.querySelector('.profileControls').hidden=name!=='mapping';
   if(name==='device' && catalog) refreshFavoritePicker();
   for(const v of ['mapping','sessions','device']) $(v).hidden=v!==view;
   for(const b of document.querySelectorAll('[data-view]')) {
@@ -497,18 +527,18 @@ $('actionMode').onclick=()=>{draft().mode='action';renderMapping();};
 $('chordMode').onclick=()=>{draft().mode='chord';renderMapping();};
 $('manageFavorites').onclick=()=>{show('device');settingsPanel('apps');$('favoriteApp').focus();};
 $('functionSearch').oninput=renderMapping;
-$('reloadMenus').onclick=()=>readMenus(state.profile);
+$('reloadMenus').onclick=()=>readMenus(editProfile);
 $('category').onchange=e=>{$('functionSearch').value='';categoryOverride=e.target.value;renderMapping();};
 $('base').onchange=e=>{draft().base=e.target.value;renderMapping();};
-$('scope').onchange=()=>{categoryOverride='';$('functionSearch').value='';buildFunctions(state.profile);renderMapping();};
+$('scope').onchange=async()=>{updateEditor();if(!globalEdit()){try{runningApps=await api('runningApps');fillProcesses();}catch(error){fail(error);}}};
 $('inherit').onclick=async()=>{
   const key=draftKey();
-  try {const next=await api('save',{profile:state.profile,input:selected,binding:'inherit'});drafts.delete(key);renderState(next);renderMapping();}
+  try {const next=await api('save',{profile:editProfile,input:selected,binding:'inherit'});drafts.delete(key);renderState(next);renderMapping();}
   catch(error){fail(error);}
 };
 $('restore').onclick=()=>{categoryOverride=''; drafts.set(draftKey(),fromBinding(defaultForKey()));renderMapping();};
 $('save').onclick=async()=>{
-  const input=selected, profile=state.profile, key=draftKey();
+  const input=selected, profile=editProfile, key=draftKey();
   try{const next=await api('save',{input,profile,scope:$('scope').value,binding:$('save').dataset.value});drafts.delete(key);renderState(next);announce('매핑을 저장했습니다.');}
   catch(e){fail(e);}
 };
@@ -552,6 +582,6 @@ for(const method of ['addFavorite','removeFavorite']) $(method).onclick=async()=
     const result=await api(method,{profile:$('favoriteApp').value});
     if(!result)return;
     catalog.favorites=result;
-    fillFavoritePicker();buildFunctions(state.profile);renderMapping();
+    fillFavoritePicker();buildFunctions(editProfile);renderMapping();
   } catch(error){fail(error);}
 };

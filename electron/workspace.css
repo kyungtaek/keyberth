@@ -108,3 +108,7 @@ main {display:grid;grid-template-columns:minmax(315px,.85fr) minmax(470px,1.4fr)
 @keyframes breathe {from{opacity:.1;}to{opacity:.9;}}
 @keyframes soft-breathe {from{opacity:.36;}to{opacity:.68;}}
 @media(prefers-reduced-motion:reduce){.lamp{animation:none!important;}}
+
+#appEditor {width:100%;margin-top:8px;}
+#overrideCount {display:block;margin:4px 0;color:var(--muted);}
+.board [data-override] {border-style:dashed;}
