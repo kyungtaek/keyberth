@@ -29,21 +29,21 @@ bool matches_stock(const esp_partition_t* factory) {
     return ok && digest==stock;
 }
 }
-bool arm_trial_return() {
+bool validate_boot_layout() {
     auto running=esp_ota_get_running_partition();
     if (!running || (running->subtype!=ESP_PARTITION_SUBTYPE_APP_OTA_0 &&
                      running->subtype!=ESP_PARTITION_SUBTYPE_APP_OTA_1)) return false;
     auto factory=esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_APP_FACTORY,nullptr);
     auto bootData=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_OTA,nullptr);
     if (!bootData || bootData->address!=0xf000 || bootData->size!=0x2000) return false;
+    const auto* next=esp_ota_get_boot_partition();
+    return matches_stock(factory) && next && next->address==running->address;
+}
+
+bool select_factory() {
+    auto factory=esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_APP_FACTORY,nullptr);
     if (!matches_stock(factory) || esp_ota_set_boot_partition(factory)!=ESP_OK) return false;
     auto next=esp_ota_get_boot_partition();
     if (!next || next->address!=factory->address) return false;
-    return true; // Next reset returns to the verified factory partition.
-}
-
-bool resume_custom_on_wake() {
-    const auto* run=esp_ota_get_running_partition();
-    return run && (run->subtype==ESP_PARTITION_SUBTYPE_APP_OTA_0 ||
-                   run->subtype==ESP_PARTITION_SUBTYPE_APP_OTA_1) && esp_ota_set_boot_partition(run)==ESP_OK;
+    return true;
 }

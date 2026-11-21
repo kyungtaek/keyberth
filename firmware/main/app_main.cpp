@@ -3,6 +3,8 @@
 #include "trial.hpp"
 #include "preferences.hpp"
 #include "esp_sleep.h"
+#include "esp_ota_ops.h"
+#include "esp_random.h"
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
 #include "protocol/agent.hpp"
@@ -31,6 +33,7 @@ struct Tx {aim::Link link;uint8_t report=6;char json[aim::json_limit+1];};
 QueueHandle_t rx_queue=nullptr,tx_queue=nullptr;
 std::atomic<unsigned> rx_dropped{0},tx_failed{0};
 char base_mac[18];
+uint32_t bootId;
 esp_err_t board_error=ESP_ERR_INVALID_STATE;
 bool receive(aim::Link link,const uint8_t* b,size_t n) {
     if(n!=63 && n!=19)return false;
@@ -63,7 +66,7 @@ RTC_DATA_ATTR unsigned wakeCount=0;
 void sleep_board(bool manual) {
     if(gpio_get_level(gpio_num_t(aim::power_pin))==0 || gpio_get_level(gpio_num_t(aim::encoder_key_pin))==0)return;
     const uint64_t pins=(1ULL<<aim::power_pin)|(manual?0ULL:(1ULL<<aim::encoder_key_pin));
-    if(esp_sleep_enable_ext1_wakeup_io(pins,ESP_EXT1_WAKEUP_ANY_LOW)!=ESP_OK || !resume_custom_on_wake())return;
+    if(esp_sleep_enable_ext1_wakeup_io(pins,ESP_EXT1_WAKEUP_ANY_LOW)!=ESP_OK)return;
     board.render(aim::Lights{},0);board.indicators(0);board.show();
     for(int p:{aim::power_pin,aim::encoder_key_pin})rtc_gpio_pullup_en(gpio_num_t(p));
     esp_deep_sleep_start();
@@ -84,6 +87,12 @@ std::string status() {
     cJSON_AddNumberToObject(j,"ble_selected_channel",kb::prefs.channel);
     cJSON_AddBoolToObject(j,"ble_slot_bound",aim::ble_bonds()>0);
     cJSON_AddNumberToObject(j,"wake_count",wakeCount);
+    cJSON_AddNumberToObject(j,"boot_id",bootId);
+    cJSON_AddNumberToObject(j,"reset_reason",esp_reset_reason());
+    const auto* running=esp_ota_get_running_partition();
+    const auto* boot=esp_ota_get_boot_partition();
+    cJSON_AddStringToObject(j,"running_partition",running?running->label:"");
+    cJSON_AddStringToObject(j,"boot_partition",boot?boot->label:"");
     cJSON_AddBoolToObject(j,"standby_lighting",standbyLights);
     cJSON_AddBoolToObject(j,"buzzer_enabled",kb::prefs.buzzer);
     cJSON_AddBoolToObject(j,"preferences_initialized",kb::initialized);
@@ -157,14 +166,15 @@ void input(aim::InputEvent e) {
 }
 }
 extern "C" void app_main() {
+    bootId=esp_random();
     uint8_t mac[6]{};ESP_ERROR_CHECK(esp_read_mac(mac,ESP_MAC_WIFI_STA));
     std::snprintf(base_mac,sizeof(base_mac),"%02X:%02X:%02X:%02X:%02X:%02X",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
     rx_queue=xQueueCreate(64,sizeof(Rx));tx_queue=xQueueCreate(8,sizeof(Tx));
     ESP_ERROR_CHECK(rx_queue&&tx_queue?ESP_OK:ESP_ERR_NO_MEM);
     // 优先提供 USB 恢复入口；驱动初始化失败也继续处理 CDC。
     ESP_ERROR_CHECK(aim::usb_begin(receive));
-    if(!arm_trial_return()) {
-        ESP_LOGE("keyberth","Trial not armed; USB ROM recovery only");
+    if(!validate_boot_layout()) {
+        ESP_LOGE("keyberth","Unexpected boot layout; USB ROM recovery only");
         for(;;) {
             if(aim::usb_download_requested()) aim::enter_download_mode();
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -205,7 +215,7 @@ extern "C" void app_main() {
             selectUntil=0;
             if(selectedChannel!=kb::prefs.channel) {
                 auto next=kb::prefs;next.channel=selectedChannel;
-                if(kb::save(next)&&resume_custom_on_wake())esp_restart();
+                if(kb::save(next))esp_restart();
             }
         }
         static int64_t lastPowered=0;
@@ -233,10 +243,13 @@ extern "C" void app_main() {
                 aim::usb_line(ok?"OK BUZZER_PREVIEW":"ERR BUZZER_PREVIEW");
             }
             else if(!std::strcmp(line,"KEYBERTH FACTORY_RESET CONFIRM")) {
-                if(resume_custom_on_wake() && kb::request_factory_reset())esp_restart();
-                arm_trial_return();
+                if(kb::request_factory_reset())esp_restart();
             }
-            else if(!std::strcmp(line,"KEYBERTH ROLLBACK")) esp_restart();
+            else if(!std::strcmp(line,"KEYBERTH RESTART")) esp_restart();
+            else if(!std::strcmp(line,"KEYBERTH ROLLBACK")) {
+                if(select_factory())esp_restart();
+                aim::usb_line("ERR factory verification failed");
+            }
             else if(!std::strcmp(line,"BOOTLOADER CONFIRM"))aim::enter_download_mode();
             else aim::usb_line("ERR commands: STATUS UPDATE_INFO BOOTLOADER CONFIRM");
         }

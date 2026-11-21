@@ -19,12 +19,20 @@ from serial.tools.list_ports import comports
 from verify_backup import STOCK, verify
 
 ROOT = Path.home() / "Library/Application Support/Keyberth/Recovery"
-VERSION = "0.4.1-keyberth"
+VERSION = "0.4.2-keyberth"
 PREVIOUS_VERSION = "0.2.0-keyberth"
 STOCK_VERSION = "0.2.18-ai-micro-agent"
-IMAGE_HASH = "0c46e683c6ae8c1383b630cbc87964a48b6ab01e2d2574f46f7e9db09b137ee3"
-PREVIOUS_IMAGES = {670352:"8f144506356a3e624c95005d5e29028ef58d8e48f4e10834cdec08e89651ca5f",668192:"f1e902efd1127eb15065f84f2ac9a231b93c9b39890347797df828bba005972d",667664:"b5a2c30e98171c12208d6feb9cdc2c4daca8539c6fedd8eb17a562a0cdcb5f3e",667520:"bdba3551fad7f3f3ef65293aceee70bc5ef45d2b04e9876d7cd421a6ec0d5b84",380960:"4e8dd9fd545e1499f6f6776f5475b033d9ef18f924ee1ebcbd10c80149a7f885",380912:"27e975ee8e75a846b5b2bbcc7401bbbcf7ede63c5d0bac92fda3dcfeedad2700"}
-OLD_LENGTH = max(PREVIOUS_IMAGES)
+IMAGE_HASH = "056332209bec88e5bff2ea073b7db43c26d77bc7d68bc91624b219e29e5ef73a"
+PREVIOUS_IMAGES = (
+    (670352, "0c46e683c6ae8c1383b630cbc87964a48b6ab01e2d2574f46f7e9db09b137ee3"),
+    (670352, "8f144506356a3e624c95005d5e29028ef58d8e48f4e10834cdec08e89651ca5f"),
+    (668192, "f1e902efd1127eb15065f84f2ac9a231b93c9b39890347797df828bba005972d"),
+    (667664, "b5a2c30e98171c12208d6feb9cdc2c4daca8539c6fedd8eb17a562a0cdcb5f3e"),
+    (667520, "bdba3551fad7f3f3ef65293aceee70bc5ef45d2b04e9876d7cd421a6ec0d5b84"),
+    (380960, "4e8dd9fd545e1499f6f6776f5475b033d9ef18f924ee1ebcbd10c80149a7f885"),
+    (380912, "27e975ee8e75a846b5b2bbcc7401bbbcf7ede63c5d0bac92fda3dcfeedad2700"),
+)
+OLD_LENGTH = max(n for n, _ in PREVIOUS_IMAGES)
 
 OTA_SLOTS = (0x220000, 0x620000)
 OTA_SIZE = 0x400000
@@ -34,9 +42,22 @@ def require(condition, message):
     if not condition:
         raise RuntimeError(message)
 
+def selection(sequence):
+    selector=bytearray(b"\xff"*4096)
+    selector[:4]=struct.pack("<I",sequence)
+    selector[24:28]=bytes(4)
+    selector[28:32]=struct.pack("<I",binascii.crc32(selector[:4],0xffffffff))
+    return bytes(selector)
+
 def usb(pid, location=None):
-    ports = [p for p in comports() if (p.vid,p.pid)==(0x303a,pid) and (location is None or p.location==location)]
-    require(len(ports)==1, "같은 USB 위치에서 AI Micro 한 대를 확인할 수 없습니다.")
+    devices = [p for p in comports() if p.vid==0x303a]
+    ports = [p for p in devices if p.pid==pid and (location is None or p.location==location)]
+    if not ports and pid==0x8360 and any(p.pid==0x1001 for p in devices):
+        raise RuntimeError("USB 복구 포트만 보입니다. 진행 중인 펌웨어 작업이 없다면 기기를 껐다 켜고 Mac 본체에 다시 연결하세요.")
+    mode="일반" if pid==0x8360 else "ROM 복구"
+    if not ports:
+        raise RuntimeError(f"AI Micro의 {mode} USB 포트를 찾지 못했습니다. 같은 Mac 본체 포트에 직접 연결하세요.")
+    require(len(ports)==1, f"{mode} USB 포트가 여러 개입니다. 대상 AI Micro 한 대만 연결하세요.")
     return ports[0]
 
 def query(port,command,prefix):
@@ -83,6 +104,8 @@ def run(action, image):
             require(result.get("running_partition")=="factory" and result.get("storage_layout_ok"),"정품 파티션 확인 실패")
         else:
             require(result.get("board_init")=="ESP_OK","보드 초기화 실패")
+        if version==VERSION:
+            require(result.get("running_partition") in ("ota_0","ota_1") and result["running_partition"]==result.get("boot_partition"),"기본 부팅 파티션 불일치")
         return result
     if action in ("install","update") and initial.get("firmware")==VERSION:
         require(hashlib.sha256(image.read_bytes()).hexdigest()==IMAGE_HASH,"이미지 체크섬 불일치")
@@ -92,7 +115,7 @@ def run(action, image):
         require(initial.get("firmware")==STOCK_VERSION,"기존 키버스 펌웨어가 설치되어 있습니다. 업데이트를 선택하세요.")
     if action=="reset":
         reset_version=initial.get("firmware")
-        require(reset_version in ("0.4.0-keyberth",VERSION),"공장 초기화는 키버스 펌웨어 0.4.0 이상에서 지원합니다.")
+        require(reset_version in ("0.4.0-keyberth","0.4.1-keyberth",VERSION),"공장 초기화는 키버스 펌웨어 0.4.0 이상에서 지원합니다.")
         check(reset_version)
         with serial.Serial(port.device,115200,timeout=1) as link:
             link.write(b"KEYBERTH FACTORY_RESET CONFIRM\n")
@@ -109,30 +132,29 @@ def run(action, image):
         wait_for(defaults,25)
         return reset_version
     if action=="update":
-        require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth",VERSION),"키버스 펌웨어에서 업데이트할 수 있습니다.")
+        require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth",VERSION),"키버스 펌웨어에서 업데이트할 수 있습니다.")
         require(hashlib.sha256(image.read_bytes()).hexdigest()==IMAGE_HASH,"이미지 체크섬 불일치")
         check(initial["firmware"])
-        with serial.Serial(port.device,115200,timeout=1) as link:
-            link.write(b"KEYBERTH ROLLBACK\n");link.flush()
-        wait_for(lambda:check(STOCK_VERSION,after_reboot=True),25)
-        port=usb(0x8360)
-        location=port.location
     if action=="rollback":
         if initial.get("firmware")!=STOCK_VERSION:
-            require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth",VERSION),"지원하는 키버스-펌웨어만 롤백할 수 있습니다.")
+            require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth",VERSION),"지원하는 키버스-펌웨어만 롤백할 수 있습니다.")
             check(initial["firmware"])
             with serial.Serial(port.device,115200,timeout=1) as link:
                 link.write(b"KEYBERTH ROLLBACK\n");link.flush()
         wait_for(lambda:check(STOCK_VERSION,after_reboot=True),25)
         return
-    check(STOCK_VERSION)
-    stock_settings=query(port,b'PREFS_GET\t{"id":921}',b"CMPREFS")
-    require(stock_settings.get("ok") and stock_settings.get("id")==921,"정품 설정 읽기 실패")
+    check(initial["firmware"])
+    stock_settings=None
+    if initial["firmware"]!=PREVIOUS_VERSION:
+        stock_settings=query(port,b'PREFS_GET\t{"id":921}',b"CMPREFS")
+        require(stock_settings.get("ok") and stock_settings.get("id")==921,"정품 설정 읽기 실패")
     content=image.read_bytes()
     require(hashlib.sha256(content).hexdigest()==IMAGE_HASH,"시험 이미지 체크섬 불일치")
     work=Path(tempfile.mkdtemp(prefix="install-",dir=ROOT))
     def rom(*args, stub=True, reset=False):
-        path=usb(0x1001,location).device
+        # macOS can briefly remove the serial node between ROM commands.
+        # Retry discovery on the original port only, before issuing the command.
+        path=wait_for(lambda:usb(0x1001,location),5).device
         output=io.StringIO()
         with contextlib.redirect_stdout(output):
             esptool.main(["--chip","esp32s3","--port",path,"--before","no_reset","--after","watchdog_reset" if reset else "no_reset",
@@ -153,6 +175,7 @@ def run(action, image):
         pass
     wait_for(lambda:usb(0x1001,location),18)
     require(mac in rom("read_mac",stub=False).lower(),"ROM 기기 식별 실패")
+    slot_touched=False
     selector_touched=False
     original=work/"selection.bin"
     try:
@@ -176,20 +199,24 @@ def run(action, image):
         for start,length,digest in STOCK:
             data=read(start,length,work/f"region-{start:x}.bin")
             require(hashlib.sha256(data).hexdigest()==digest,"정품 구성 요소 불일치")
-        require(read(SELECT,8192,original)==bytes([255])*8192,"기존 OTA 선택 보존을 위해 중단했습니다.")
+        selected=read(SELECT,8192,original)
+        current_slot=initial.get("running_partition")
+        known_selection=any(current_slot==f"ota_{i-1}" and selected==selection(i)+b"\xff"*4096 for i in (1,2))
+        require(selected==b"\xff"*8192 or known_selection,"기존 OTA 선택 보존을 위해 중단했습니다.")
         reserved=read(0xc30000,65536,work/"settings-before.bin")
         require(reserved==bytes([255])*65536 or reserved[0xf000:].startswith(b"keyberth-settings-v1\0"),"설정 영역에 다른 데이터가 있습니다.")
         length=((max(len(content),OLD_LENGTH)+4095)//4096)*4096
         pad=lambda n: bytes([255])*n
         current=content+pad(length-len(content))
-        for sequence,address in enumerate(OTA_SLOTS,1):
+        candidates=sorted(enumerate(OTA_SLOTS,1), key=lambda item:current_slot==f"ota_{item[0]-1}")
+        for sequence,address in candidates:
             # Only overwrite a blank slot or a complete known Keyberth image.
             old=read(address,OTA_SIZE,work/f"slot-{sequence}-before.bin")
             if old[length:]!=pad(OTA_SIZE-length):
                 continue
             prefix=old[:length]
             previous=any(hashlib.sha256(prefix[:n]).hexdigest()==digest and prefix[n:]==pad(length-n)
-                         for n,digest in PREVIOUS_IMAGES.items())
+                         for n,digest in PREVIOUS_IMAGES)
             if prefix==current or previous or prefix==pad(length):
                 break
         else:
@@ -197,17 +224,23 @@ def run(action, image):
         if prefix!=current:
             slot_image=work/"verified-slot.bin"
             slot_image.write_bytes(current)
+            saved_prefix=work/"slot-original.bin"
+            saved_prefix.write_bytes(prefix)
+            slot_touched=True
             rom("write_flash",hex(address),slot_image)
             require(read(address,length,work/"slot-after.bin")==current,"OTA 이미지 재읽기 실패")
-        selector=bytearray(pad(4096))
-        selector[:4]=struct.pack("<I",sequence)
-        selector[24:28]=bytes(4)
-        selector[28:32]=struct.pack("<I",binascii.crc32(selector[:4],0xffffffff))
+        selector=selection(sequence)
         path=work/"trial-selection.bin";path.write_bytes(selector)
-        selector_touched=True
-        rom("write_flash",hex(SELECT),path)
+        if selected!=selector+pad(4096):
+            selector_touched=True
+            rom("write_flash",hex(SELECT),path)
         require(read(SELECT,8192,work/"selected.bin")==selector+pad(4096),"부팅 선택 검증 실패")
     except BaseException:
+        if slot_touched or selector_touched:
+            require(mac in rom("read_mac",stub=False).lower(),"복구 대상 기기 불일치")
+        if slot_touched:
+            rom("write_flash",hex(address),saved_prefix)
+            require(read(address,length,work/"slot-restored.bin")==prefix,"이전 슬롯 복원 실패")
         if selector_touched:
             rom("write_flash",hex(SELECT),original)
             require(read(SELECT,8192,work/"restored.bin")==original.read_bytes(),"원본 부팅 선택 복원 실패")
@@ -225,6 +258,9 @@ def run(action, image):
     keys=("sleepMinutes","volumePercent","standbyMinutes","standbyPowered","standbyBluetooth")
     seeded=not running.get("preferences_initialized")
     if seeded:
+        if stock_settings is None:
+            stock_settings=query(target,b'PREFS_GET\t{"id":921}',b"CMPREFS")
+            require(stock_settings.get("ok"),"기본 설정 읽기 실패")
         fields={k:stock_settings[k] for k in keys}
         fields.update(version=1,id=922,revision=1,initialBuzzerEnabled=stock_settings["buzzerEnabled"])
         reply=query(target,b"PREFS_SET\t"+json.dumps(fields).encode(),b"CMPREFS")

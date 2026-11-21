@@ -374,7 +374,7 @@ function renderState(next) {
   $('usb').title=next.usb;$('cmux').title=next.cmux;
   $('connect').disabled=next.busy;
   $('lightStatus').textContent=next.lightingStatus;
-  $('firmwareName').textContent=next.usb?.includes('0.4.1-keyberth') ? '키버스-펌웨어 / 0.4.1' : next.usb?.includes('0.4.0-keyberth') ? '키버스-펌웨어 / 0.4.0' : next.usb?.includes('0.3.0-keyberth') ? '키버스-펌웨어 / 0.3.0' : next.usb?.includes('0.2.0-keyberth') ? '키버스-펌웨어 / 0.2.0' : next.usb?.includes('0.1.0-keyberth-dev') ? 'Keyberth USB / 0.1.0-dev' : next.usb?.includes('0.2.18') ? 'Universal Agent / 0.2.18' : 'AI Micro';
+  $('firmwareName').textContent=next.usb?.includes('0.4.2-keyberth') ? '키버스-펌웨어 / 0.4.2' : next.usb?.includes('0.4.1-keyberth') ? '키버스-펌웨어 / 0.4.1' : next.usb?.includes('0.4.0-keyberth') ? '키버스-펌웨어 / 0.4.0' : next.usb?.includes('0.3.0-keyberth') ? '키버스-펌웨어 / 0.3.0' : next.usb?.includes('0.2.0-keyberth') ? '키버스-펌웨어 / 0.2.0' : next.usb?.includes('0.1.0-keyberth-dev') ? 'Keyberth USB / 0.1.0-dev' : next.usb?.includes('0.2.18') ? 'Universal Agent / 0.2.18' : 'AI Micro';
   for(const [i,local] of next.slots.entries()){
     const input='K'+String(i+1).padStart(2,'0');
     const value=next.mappings[input] || '';

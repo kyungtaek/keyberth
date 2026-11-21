@@ -33,7 +33,7 @@ struct DevicePreferences: Decodable {
     static func read() throws -> Snapshot {
         let port = try AgentDevice.port()
         return try AgentDevice.withSerial(port.path) { fd in
-            guard [AgentDevice.firmware,"0.4.0-keyberth","0.3.0-keyberth",AgentDevice.developmentFirmware].contains(try AgentDevice.verify(fd)) else {
+            guard [AgentDevice.firmware,"0.4.1-keyberth","0.4.0-keyberth","0.3.0-keyberth",AgentDevice.developmentFirmware].contains(try AgentDevice.verify(fd)) else {
                 throw CompanionError("기기 설정을 사용하려면 키버스-펌웨어 0.3.0 이상이 필요합니다.")
             }
             return Snapshot(instance: port.instance, value: try request(fd, "PREFS_GET"))
@@ -44,7 +44,7 @@ struct DevicePreferences: Decodable {
         let port = try AgentDevice.port()
         guard port.instance == old.instance else { throw CompanionError("연결된 기기가 변경됐습니다. 설정을 다시 읽어 주세요.") }
         return try AgentDevice.withSerial(port.path) { fd in
-            guard [AgentDevice.firmware,"0.4.0-keyberth","0.3.0-keyberth",AgentDevice.developmentFirmware].contains(try AgentDevice.verify(fd)) else {
+            guard [AgentDevice.firmware,"0.4.1-keyberth","0.4.0-keyberth","0.3.0-keyberth",AgentDevice.developmentFirmware].contains(try AgentDevice.verify(fd)) else {
                 throw CompanionError("기기 설정을 사용하려면 키버스-펌웨어 0.3.0 이상이 필요합니다.")
             }
             let previous = old.value
