@@ -13,8 +13,8 @@ struct CompanionError: LocalizedError {
 enum AgentDevice {
     static let firmware = "0.2.18-ai-micro-agent"
 
-    static let developmentFirmware = "0.4.0-keyberth"
-    static func hasKeyLighting(_ version:String) -> Bool { [developmentFirmware,"0.3.0-keyberth","0.2.0-keyberth","0.1.0-keyberth-dev"].contains(version) }
+    static let developmentFirmware = "0.4.1-keyberth"
+    static func hasKeyLighting(_ version:String) -> Bool { [developmentFirmware,"0.4.0-keyberth","0.3.0-keyberth","0.2.0-keyberth","0.1.0-keyberth-dev"].contains(version) }
 
     // Walk up from the callout node to its USB device. The location also ties
     // the CDC version reply to the HID collection used for input and lights.
@@ -250,7 +250,7 @@ final class AgentHID {
                   let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
                   obj["session"] as? String == session else { return }
             guard let reportedVersion = obj["version"] as? String,
-                  reportedVersion == expectedVersion || (location == nil && reportedVersion == "0.3.0-keyberth"), obj["protocol"] as? String == "ai-micro-agent-v1",
+                  reportedVersion == expectedVersion || (location == nil && ["0.4.0-keyberth","0.3.0-keyberth"].contains(reportedVersion)), obj["protocol"] as? String == "ai-micro-agent-v1",
                   obj["hardware"] as? String == "AI Micro", obj["slots"] as? Int == 6,
                   let caps = obj["capabilities"] as? [String], ["input-events","slot-states","selected-slot"].allSatisfy(caps.contains),
                   !supportsKeyLighting || caps.contains("keyberth-light-v1")

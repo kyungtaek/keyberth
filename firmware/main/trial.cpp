@@ -44,5 +44,6 @@ bool arm_trial_return() {
 
 bool resume_custom_on_wake() {
     const auto* run=esp_ota_get_running_partition();
-    return run && run->subtype==ESP_PARTITION_SUBTYPE_APP_OTA_0 && esp_ota_set_boot_partition(run)==ESP_OK;
+    return run && (run->subtype==ESP_PARTITION_SUBTYPE_APP_OTA_0 ||
+                   run->subtype==ESP_PARTITION_SUBTYPE_APP_OTA_1) && esp_ota_set_boot_partition(run)==ESP_OK;
 }

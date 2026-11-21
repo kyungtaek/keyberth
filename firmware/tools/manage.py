@@ -19,14 +19,15 @@ from serial.tools.list_ports import comports
 from verify_backup import STOCK, verify
 
 ROOT = Path.home() / "Library/Application Support/Keyberth/Recovery"
-VERSION = "0.4.0-keyberth"
+VERSION = "0.4.1-keyberth"
 PREVIOUS_VERSION = "0.2.0-keyberth"
 STOCK_VERSION = "0.2.18-ai-micro-agent"
-IMAGE_HASH = "8f144506356a3e624c95005d5e29028ef58d8e48f4e10834cdec08e89651ca5f"
-PREVIOUS_IMAGES = {668192:"f1e902efd1127eb15065f84f2ac9a231b93c9b39890347797df828bba005972d",667664:"b5a2c30e98171c12208d6feb9cdc2c4daca8539c6fedd8eb17a562a0cdcb5f3e",667520:"bdba3551fad7f3f3ef65293aceee70bc5ef45d2b04e9876d7cd421a6ec0d5b84",380960:"4e8dd9fd545e1499f6f6776f5475b033d9ef18f924ee1ebcbd10c80149a7f885",380912:"27e975ee8e75a846b5b2bbcc7401bbbcf7ede63c5d0bac92fda3dcfeedad2700"}
+IMAGE_HASH = "0c46e683c6ae8c1383b630cbc87964a48b6ab01e2d2574f46f7e9db09b137ee3"
+PREVIOUS_IMAGES = {670352:"8f144506356a3e624c95005d5e29028ef58d8e48f4e10834cdec08e89651ca5f",668192:"f1e902efd1127eb15065f84f2ac9a231b93c9b39890347797df828bba005972d",667664:"b5a2c30e98171c12208d6feb9cdc2c4daca8539c6fedd8eb17a562a0cdcb5f3e",667520:"bdba3551fad7f3f3ef65293aceee70bc5ef45d2b04e9876d7cd421a6ec0d5b84",380960:"4e8dd9fd545e1499f6f6776f5475b033d9ef18f924ee1ebcbd10c80149a7f885",380912:"27e975ee8e75a846b5b2bbcc7401bbbcf7ede63c5d0bac92fda3dcfeedad2700"}
 OLD_LENGTH = max(PREVIOUS_IMAGES)
 
-OTA = 0x220000
+OTA_SLOTS = (0x220000, 0x620000)
+OTA_SIZE = 0x400000
 SELECT = 0xf000
 
 def require(condition, message):
@@ -90,13 +91,15 @@ def run(action, image):
     if action=="install":
         require(initial.get("firmware")==STOCK_VERSION,"기존 키버스 펌웨어가 설치되어 있습니다. 업데이트를 선택하세요.")
     if action=="reset":
-        check(VERSION)
+        reset_version=initial.get("firmware")
+        require(reset_version in ("0.4.0-keyberth",VERSION),"공장 초기화는 키버스 펌웨어 0.4.0 이상에서 지원합니다.")
+        check(reset_version)
         with serial.Serial(port.device,115200,timeout=1) as link:
             link.write(b"KEYBERTH FACTORY_RESET CONFIRM\n")
             link.flush()
         time.sleep(2)
         def defaults():
-            state=check(VERSION,after_reboot=True)
+            state=check(reset_version,after_reboot=True)
             require(state.get("ble_selected_channel")==1 and not state.get("ble_slot_bound")
                     and state.get("preferences_initialized") is False,"초기화 부팅 대기")
             saved=query(usb(0x8360),b'PREFS_GET\t{"id":925}',b"CMPREFS")
@@ -104,9 +107,9 @@ def run(action, image):
                           standbyMinutes=5,standbyPowered=True,standbyBluetooth=False,styles=[""]*14)
             require(saved.get("ok") and all(saved.get(k)==v for k,v in expected.items()),"기본값 검증 실패")
         wait_for(defaults,25)
-        return
+        return reset_version
     if action=="update":
-        require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth",VERSION),"키버스 펌웨어에서 업데이트할 수 있습니다.")
+        require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth",VERSION),"키버스 펌웨어에서 업데이트할 수 있습니다.")
         require(hashlib.sha256(image.read_bytes()).hexdigest()==IMAGE_HASH,"이미지 체크섬 불일치")
         check(initial["firmware"])
         with serial.Serial(port.device,115200,timeout=1) as link:
@@ -116,7 +119,7 @@ def run(action, image):
         location=port.location
     if action=="rollback":
         if initial.get("firmware")!=STOCK_VERSION:
-            require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth",VERSION),"지원하는 키버스-펌웨어만 롤백할 수 있습니다.")
+            require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth",VERSION),"지원하는 키버스-펌웨어만 롤백할 수 있습니다.")
             check(initial["firmware"])
             with serial.Serial(port.device,115200,timeout=1) as link:
                 link.write(b"KEYBERTH ROLLBACK\n");link.flush()
@@ -177,18 +180,27 @@ def run(action, image):
         reserved=read(0xc30000,65536,work/"settings-before.bin")
         require(reserved==bytes([255])*65536 or reserved[0xf000:].startswith(b"keyberth-settings-v1\0"),"설정 영역에 다른 데이터가 있습니다.")
         length=((max(len(content),OLD_LENGTH)+4095)//4096)*4096
-        old=read(OTA,length,work/"slot-before.bin")
         pad=lambda n: bytes([255])*n
         current=content+pad(length-len(content))
-        if old!=current:
-            previous=any(hashlib.sha256(old[:n]).hexdigest()==digest and old[n:]==pad(length-n) for n,digest in PREVIOUS_IMAGES.items())
-            require(previous or old==pad(length),"다른 OTA 이미지가 있어 중단했습니다.")
+        for sequence,address in enumerate(OTA_SLOTS,1):
+            # Only overwrite a blank slot or a complete known Keyberth image.
+            old=read(address,OTA_SIZE,work/f"slot-{sequence}-before.bin")
+            if old[length:]!=pad(OTA_SIZE-length):
+                continue
+            prefix=old[:length]
+            previous=any(hashlib.sha256(prefix[:n]).hexdigest()==digest and prefix[n:]==pad(length-n)
+                         for n,digest in PREVIOUS_IMAGES.items())
+            if prefix==current or previous or prefix==pad(length):
+                break
+        else:
+            raise RuntimeError("두 OTA 슬롯에 보존할 데이터가 있어 설치를 중단했습니다.")
+        if prefix!=current:
             slot_image=work/"verified-slot.bin"
             slot_image.write_bytes(current)
-            rom("write_flash",hex(OTA),slot_image)
-            require(read(OTA,length,work/"slot-after.bin")==current,"OTA 이미지 재읽기 실패")
+            rom("write_flash",hex(address),slot_image)
+            require(read(address,length,work/"slot-after.bin")==current,"OTA 이미지 재읽기 실패")
         selector=bytearray(pad(4096))
-        selector[:4]=struct.pack("<I",1)
+        selector[:4]=struct.pack("<I",sequence)
         selector[24:28]=bytes(4)
         selector[28:32]=struct.pack("<I",binascii.crc32(selector[:4],0xffffffff))
         path=work/"trial-selection.bin";path.write_bytes(selector)
