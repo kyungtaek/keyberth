@@ -3,7 +3,7 @@ const {promisify} = require('node:util');
 const path = require('node:path');
 const run = promisify(execFile);
 
-function firmwareControls(app, dialog, reconnect) {
+function firmwareControls(app, dialog, reconnect, progress) {
   const dir = app.isPackaged ? path.join(process.resourcesPath, 'firmware') : path.join(__dirname,'../dist/firmware');
   let busy = false;
   async function manage(action) {
@@ -21,11 +21,13 @@ function firmwareControls(app, dialog, reconnect) {
       const choice = await dialog.showMessageBox({type:action==='reset'?'warning':'question',message:title,
         detail,buttons:['취소',title],defaultId:0,cancelId:0});
       if (choice.response !== 1) return 'cancelled';
+      progress(({install:'펌웨어 설치 중',update:'펌웨어 업데이트 중',reset:'기기 초기화 중',rollback:'정품 펌웨어로 복귀 중'})[action]);
       const {stdout}=await run(path.join(dir,'keyberth-firmware'),[action,path.join(dir,'keyberth-0.4.3.bin')]);
       if (stdout.trim()==='already-current') {
         await dialog.showMessageBox({message:'키버스 펌웨어 0.4.3가 이미 설치되어 있습니다.',buttons:['확인']});
         return 'current';
       }
+      progress('기기 다시 연결 중');
       await reconnect();
       await dialog.showMessageBox({message:title+' 완료',buttons:['확인']});
       return 'done';
@@ -34,7 +36,7 @@ function firmwareControls(app, dialog, reconnect) {
       const reason=lines.filter(line=>line.trim() && !/^\[PYI-/.test(line)).at(-1);
       dialog.showErrorBox('펌웨어 작업을 완료하지 못했습니다.',reason || error.message);
       return 'failed';
-    } finally { busy=false; }
+    } finally { busy=false; progress(''); }
   }
   return {manage, menu:{label:'기기 펌웨어',submenu:[
     {label:'키버스-펌웨어 0.4.3 설치…',click:()=>manage('install')},

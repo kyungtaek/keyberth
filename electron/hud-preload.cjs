@@ -7,8 +7,7 @@ ipcRenderer.on('hud', (_, message) => {
   const pad = document.getElementById('pad'), legend = document.getElementById('legend');
   pad.hidden = !keys.length;
   document.body.classList.toggle('guide',!!keys.length);
-  document.getElementById('title').textContent = message.title;
-  document.getElementById('detail').textContent = keys.length ? '' : message.subtitle;
+  document.getElementById('title').textContent = message.subtitle;
   pad.replaceChildren(); legend.replaceChildren();
   if (!keys.length) return;
   const changed = new Set(keys.map(item=>item.key));

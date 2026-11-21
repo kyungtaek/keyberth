@@ -3,15 +3,16 @@ const { app, autoUpdater, dialog } = require('electron');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
-function configureUpdates(beforeInstall) {
+function configureUpdates(beforeInstall, canInstall = () => true) {
   const bundle = path.resolve(process.execPath,'../../..');
   const signed = app.isPackaged && process.platform === 'darwin' &&
     /Authority=Developer ID Application:/.test(spawnSync('/usr/bin/codesign',['-dv','--verbose=4',bundle],{encoding:'utf8'}).stderr || '');
   let busy=false, manual=false, downloaded=false;
   const inform=(message,detail='')=>dialog.showMessageBox({type:'info',message,detail,buttons:['확인']});
   async function install() {
+    if (!canInstall()) return;
     const {response}=await dialog.showMessageBox({type:'info',message:'Keyberth 업데이트가 준비되었습니다.',buttons:['재시작하고 설치','나중에'],defaultId:0,cancelId:1});
-    if(response===0) autoUpdater.quitAndInstall();
+    if(response===0 && canInstall()) autoUpdater.quitAndInstall();
   }
   function check(user=false) {
     if(!signed || bundle.startsWith('/Volumes/') || bundle.includes('/AppTranslocation/')) {

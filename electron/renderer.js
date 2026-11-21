@@ -695,6 +695,14 @@ for(const action of ['importMaps','exportMaps']) {
     }catch(error){fail(error);}
   };
 }
+const firmwareWait=$('firmwareWait');
+firmwareWait.addEventListener('cancel',event=>event.preventDefault());
+window.keyberth.onFirmwareProgress(message=>{
+  if (message) {
+    $('firmwareWaitTitle').textContent=message;
+    if (!firmwareWait.open) firmwareWait.showModal();
+  } else if (firmwareWait.open) firmwareWait.close();
+});
 window.keyberth.onView(show);
 (async()=>{catalog=await api('catalog');build();await poll();show(view);setInterval(()=>{if(!document.hidden)poll();},900);document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});})().catch(fail);
 

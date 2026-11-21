@@ -36,7 +36,9 @@ function showHud(message) {
   }
   if (!hudReady) return;
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-  const height=message.keys?.length ? 108 : 84, width=300;
+  const guide = Boolean(message.keys?.length);
+  const width = Math.min(area.width, guide ? 352 : 420);
+  const height = guide ? 112 : Math.min(area.height, Math.max(80, 36 + 34 * Math.ceil(Array.from(message.subtitle || '').length / 17)));
   hud.setSize(width,height);
   hud.setPosition(Math.round(area.x+(area.width-width)/2), Math.round(area.y+Math.max(0,area.height-height-32)));
   hud.webContents.send('hud', message);
@@ -92,20 +94,30 @@ function makeWindow() {
   });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
+  win.webContents.on('did-finish-load', () => win.webContents.send('firmware-progress',firmwareProgress));
   win.loadFile(page);
-  win.on('close', event => { if (!quitting) { event.preventDefault(); win.hide(); } });
+  win.on('close', event => { if (!quitting) { event.preventDefault(); if (!firmwareProgress) win.hide(); } });
   return win;
 }
 function openEditor(view = 'mapping') {
   if (!editor) editor = makeWindow();
   const win = editor;
-  const show = () => { win.webContents.send('view', view); win.show(); win.focus(); };
+  const show = () => { if (!firmwareProgress) win.webContents.send('view', view); win.show(); win.focus(); };
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', show);
   else show();
 }
-const firmwareControls=require('./firmware.cjs').firmwareControls(app,dialog,()=>request('connect'));
+let firmwareProgress = '';
+function showFirmwareProgress(message) {
+  firmwareProgress = message;
+  if (message) openEditor('device');
+  editor?.webContents.send('firmware-progress',message);
+  editor?.setProgressBar(message ? 2 : -1);
+  for (const item of Menu.getApplicationMenu()?.items || []) item.enabled = !message;
+}
+const firmwareControls=require('./firmware.cjs').firmwareControls(app,dialog,()=>request('connect'),showFirmwareProgress);
 ipcMain.handle('command', async (event, method, data) => {
   if (fileURLToPath(event.senderFrame.url) !== page) throw new Error('Unknown window');
+  if (firmwareProgress && !['state','catalog'].includes(method)) throw new Error('펌웨어 작업 중입니다.');
   if (method==='manageFirmware' && editor && event.sender===editor.webContents)
     return firmwareControls.manage(data?.action);
   if (['addProfile','removeProfile','addFavorite','removeFavorite'].includes(method)) {
@@ -157,12 +169,13 @@ else {
     icon.setTemplateImage(true);
     tray = new Tray(icon); tray.setToolTip('Keyberth'); tray.on('click', () => openEditor());
     const permissionGuide = installPermissionGuide(request, () => editor);
-    const checkUpdates = require('./updates.cjs').configureUpdates(() => { quitting = true; });
+    const checkUpdates = require('./updates.cjs').configureUpdates(() => { quitting = true; }, () => !firmwareProgress);
     const items = [{ label:'키 매핑', click:()=>openEditor() }, { label:'기기 설정…', accelerator:'Cmd+,', click:()=>openEditor('device') },
       firmwareControls.menu,
       {label:'권한 안내…', click:()=>{ openEditor(); permissionGuide.showOnDemand(); }},
       {label:'업데이트 확인…',click:checkUpdates}, {type:'separator'}, {label:'Keyberth 종료', role:'quit'}];
     tray.on('right-click', async () => {
+      if (firmwareProgress) { openEditor(); return; }
       let controls;
       try {
         const state = await request('state');
@@ -173,6 +186,7 @@ else {
       } catch {
         controls = [{label:'키맵 연결 대기 중', enabled:false}];
       }
+      if (firmwareProgress) return;
       tray.popUpContextMenu(Menu.buildFromTemplate([...controls, {type:'separator'}, ...items]));
     });
     Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Keyberth', submenu:items},{role:'editMenu'},{role:'windowMenu'}]));
@@ -182,6 +196,6 @@ else {
   app.on('activate', () => {
     if (!editor || !editor.isVisible()) openEditor();
   });
-  app.on('before-quit', () => { quitting = true; bridge?.stdin.end(); });
+  app.on('before-quit', event => { if (firmwareProgress) { event.preventDefault(); return; } quitting = true; bridge?.stdin.end(); });
   app.on('window-all-closed', () => {});
 }
