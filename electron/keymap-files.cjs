@@ -26,8 +26,8 @@ async function transfer(method,editor,dialog,request) {
     if(n===buf.length)throw Error('파일이 너무 큽니다.');
     archive=JSON.parse(buf.toString('utf8',0,n));
   }finally{await file.close();}
-  if(archive?.version!==1 || !archive.profiles || Array.isArray(archive.profiles) || typeof archive.profiles!=='object' ||
-    !Object.keys(archive.profiles).length || !Object.values(archive.profiles).every(map=>map && typeof map==='object' && !Array.isArray(map) && Object.values(map).every(v=>typeof v==='string')))throw Error('지원하지 않는 키맵 파일입니다.');
+  if(![1,2].includes(archive?.version) || !archive.profiles || Array.isArray(archive.profiles) || typeof archive.profiles!=='object' ||
+    (archive.version===1 && !Object.keys(archive.profiles).length) || !Object.values(archive.profiles).every(map=>map && typeof map==='object' && !Array.isArray(map) && Object.values(map).every(v=>typeof v==='string')))throw Error('지원하지 않는 키맵 파일입니다.');
   const confirm=await dialog.showMessageBox(editor,{message:'파일에 포함된 프로필의 키맵을 교체할까요?',detail:Object.keys(archive.profiles).join(', '),buttons:['가져오기','취소'],defaultId:0,cancelId:1});
   return confirm.response===0 ? request('importMaps',{archive}) : null;
 }

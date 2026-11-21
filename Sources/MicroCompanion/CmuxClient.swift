@@ -80,7 +80,17 @@ extension CmuxClient {
         let target = live[index]
         let workspace = ["--workspace", target.workspace.uuidString, "--window", target.window.uuidString]
         let surface = ["--surface", target.id.uuidString] + workspace
-        if let override { try await send(override, to: target); return }
+        if let override {
+            switch override {
+            case "agent.stop": try await send("ctrl+c",to:target)
+            case "agent.wake","agent.hibernate":
+                _ = try run(["agent-hibernation",override == "agent.wake" ? "wake" : "hibernate",target.id.uuidString])
+            case "agent.splitRight","agent.splitDown":
+                _ = try run(["new-split",override == "agent.splitRight" ? "right" : "down","--focus","true"] + surface)
+            default: try await send(override,to:target)
+            }
+            return
+        }
         switch input {
         case .turn(let step):
             try focus(live[(index + live.count + step) % live.count])

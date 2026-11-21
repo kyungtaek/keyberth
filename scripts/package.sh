@@ -27,7 +27,7 @@ plutil -replace CFBundleIconFile -string Keyberth.icns "$plist"
 version="$(node -p 'require("./package.json").version')"
 plutil -replace CFBundleShortVersionString -string "$version" "$plist"
 plutil -replace CFBundleVersion -string "$version" "$plist"
-plutil -replace LSUIElement -bool YES "$plist"
+plutil -replace LSUIElement -bool NO "$plist"
 dest="$PWD/dist/MicroCompanion.app"
 if [[ -e "$dest" ]]; then mv "$dest" "$temp/previous.app"; fi
 if ! mv "$app" "$dest"; then

@@ -2,8 +2,6 @@
 const $ = id => document.getElementById(id);
 const api = window.keyberth.command;
 const query = new URLSearchParams(location.search);
-const popup = query.get('popup') === 'true';
-document.body.classList.toggle('popup', popup);
 let categoryOverride = '';
 let view = query.get('view') || 'mapping';
 let catalog, state, selected = 'K07', prefs, prefsBusy = false, polling = false, noticeTimer;
@@ -25,8 +23,34 @@ function group(cls) {
   node.className = cls;
   return node;
 }
-function draftKey() { return state.profile + '/' + selected; }
-function binding(id) { return state.mappings[id] || id; }
+// All editors use the same change handler for pointer, keyboard and restored values.
+function buildPicker(select, container) {
+  container.replaceChildren();
+  let lastGroup, row=container;
+  for (const option of select.options) {
+    if (!option.value) continue;
+    const part=option.parentElement;
+    if(part.tagName==='OPTGROUP' && part!==lastGroup) {
+      const label=document.createElement('h3'); label.textContent=part.label;
+      row=group('keyGrid'); container.append(label,row); lastGroup=part;
+    }
+    const item=button(option.textContent,'pick',()=>{
+      select.value=option.value; select.dispatchEvent(new Event('change'));
+    });
+    item.dataset.value=option.value;
+    row.append(item);
+  }
+  syncPicker(select,container);
+}
+function syncPicker(select,container) {
+  for(const item of container.querySelectorAll('button')) {
+    item.disabled=select.disabled;
+    item.setAttribute('aria-pressed',String(item.dataset.value===select.value));
+  }
+}
+function globalEdit() { return $('scope').value==='global'; }
+function draftKey() { return (globalEdit()?'global':state.profile) + '/' + selected; }
+function binding(id) { return (globalEdit()?state.globalMappings:state.mappings)?.[id] || id; }
 const notePrefix = 'obsidian-note:';
 const noteTitle = value => value.slice(notePrefix.length).split('/').pop().replace(/\.md$/i,'');
 const desktopFunctions = [
@@ -34,10 +58,46 @@ const desktopFunctions = [
   ['cmd+z','실행 취소'],['cmd+shift+z','다시 실행'],['escape','취소 / 닫기'],['space','공백 입력'],['enter','엔터 입력'],
   ['left','왼쪽 이동'],['right','오른쪽 이동'],['up','위로 이동'],['down','아래로 이동']
 ];
+const appMenus = new Map();
+const menuProfiles = new Set(['codex','t3','cmux']);
 let availableFunctions = new Map();
+let runningApps = {};
+function storedActionLabel(id) {
+  if (id.startsWith('menu:')) {
+    try {return JSON.parse(id.slice(5)).join(' › ');} catch {return id;}
+  }
+  if (id.startsWith('launch.')) return (catalog.favorites[id.slice(7)] || id.slice(7))+' 열기';
+  return '';
+}
+async function readMenus(profile) {
+  if (!menuProfiles.has(profile)) return;
+  try {
+    const menus = await api('appMenus',{profile});
+    appMenus.set(profile,menus);
+    if (state?.profile===profile) { buildFunctions(profile); renderMapping(); }
+  } catch(error) { fail(error); }
+}
+function fillFavoritePicker() {
+  const picker=$('favoriteApp'), selected=picker.value;
+  picker.replaceChildren(new Option('응용 프로그램 파일 선택…',''));
+  for(const [title,apps] of [['즐겨찾기',catalog.favorites],['실행 중',runningApps]]) {
+    const group=document.createElement('optgroup');group.label=title;
+    for(const [id,name] of Object.entries(apps).sort((a,b)=>a[1].localeCompare(b[1]))) {
+      if(title==='실행 중' && id in catalog.favorites) continue;
+      group.append(new Option(name,id));
+    }
+    if(group.children.length) picker.append(group);
+  }
+  picker.value=[...picker.options].some(o=>o.value===selected)?selected:'';
+  picker.onchange();
+}
+async function refreshFavoritePicker() {
+  try {runningApps=await api('runningApps');fillFavoritePicker();} catch(error) {fail(error);}
+}
+
 function actionText(value) {
   if(value.startsWith(notePrefix)) return noteTitle(value);
-  return availableFunctions.get(value) || (state.profile==='cmux' && byId.get(value)?.action) || '사용자 단축키';
+  return availableFunctions.get(value) || storedActionLabel(value) || (state.profile==='cmux' && byId.get(value)?.action) || '사용자 단축키';
 }
 const actionIcons = {
   K07: 'workspace', K08: 'approve', K09: 'deny', K10: 'sidebar',
@@ -51,15 +111,23 @@ function graphic(name) {
   img.draggable = false;
   return img;
 }
+let previewKey='K01';
+let liveSlots=[];
+function simulating() { return view==='device' && !$('lighting').hidden; }
 function createKey(id, icon) {
   const number = id.startsWith('K');
-  const b = button('', number ? 'cap' : 'smallKey', () => { selected = id; categoryOverride = ''; renderMapping(); });
+  const b = button('', number ? 'cap' : 'smallKey', () => {
+    if(simulating()) {previewKey=id; renderPreview();return;}
+    if(view==='sessions') {slotButtons[Number(id.slice(1))-1]?.click();return;}
+    selected=id;categoryOverride='';renderMapping();
+  });
   b.dataset.control = id;
   if (number) {
     const num = document.createElement('span'), label = document.createElement('span');
     num.className = 'keyNum'; num.textContent = id.slice(1);
     label.className = 'capLabel';
-    b.append(num, graphic('session'), label);
+    const lamp=group('lamp');lamp.setAttribute('aria-hidden','true');
+    b.append(lamp,num,graphic('session'),label);
   } else if (icon) b.append(graphic(icon));
   buttons.set(id, b);
   return b;
@@ -79,6 +147,8 @@ function build() {
     for(const k of keys) g.append(new Option(k.toUpperCase(),k));
     $('base').append(g);
   }
+  buildPicker($('base'),$('baseGrid'));
+  buildPicker($('scope'),$('scopesBar'));
   for(const m of catalog.modifiers) {
     const b=button({cmd:'⌘ Command',ctrl:'⌃ Control',alt:'⌥ Option',shift:'⇧ Shift'}[m],'',()=>{
       const d=draft(); d.mods=d.mods.includes(m)?d.mods.filter(v=>v!==m):[...d.mods,m]; renderMapping();
@@ -91,7 +161,7 @@ function build() {
     b.append(num,document.createElement('b'),document.createElement('small'));$('slots').append(b);slotButtons.push(b);
   }
 }
-function buildFunctions(profile) {
+function buildFunctions(profile,currentMappings=state?.mappings||{}) {
   let groups;
   if(profile==='cmux') {
     groups=[
@@ -103,12 +173,30 @@ function buildFunctions(profile) {
   } else {
     groups=[];
     const actions=Object.entries(catalog.agentActions[profile] || {}).sort(([a],[b])=>a.localeCompare(b));
-    if(actions.length) groups.push(['최근 세션',actions.filter(([id])=>id.startsWith('recent.'))]);
-    if(actions.some(([id])=>id.startsWith('agent.'))) groups.push(['대화 제어',actions.filter(([id])=>id.startsWith('agent.'))]);
+    if(actions.some(([id])=>id.startsWith('recent.'))) groups.push(['최근 세션',actions.filter(([id])=>id.startsWith('recent.'))]);
+    if(actions.some(([id])=>id.startsWith('agent.'))) groups.push(['대화 제어',actions.filter(([id])=>id.startsWith('agent.') && !id.startsWith('agent.t3.'))]);
+    if(profile==='t3') groups.push(['T3 명령',actions.filter(([id])=>id.startsWith('agent.t3.'))]);
     if(profile==='slack') groups.push(['Slack', catalog.slackActions.map(x=>[x.id,x.name])]);
     if(profile==='obsidian') groups.push(['Obsidian', [['cmd+o','빠른 전환'],['cmd+p','명령 팔레트'],['cmd+n','새 노트']]]);
-    groups.push(['편집 · 이동', desktopFunctions], ['기타',[['none','미할당']]]);
+    groups.push(['편집 · 이동', desktopFunctions.filter(([id])=>id!=='cmd+d'||profile==='claude')], ['기타',[['none','미할당']]]);
   }
+  if(profile==='cmux') groups.unshift(['대화 제어',Object.entries(catalog.agentActions.cmux)]);
+  const shared=Array.from({length:6},(_,i)=>['allRecent.'+(i+1),'통합 최근 세션 '+(i+1)]);
+  if(globalEdit() || profile==='unconfigured') groups=[['기타',[['none','미할당']]]];
+  groups.unshift(['통합 최근 세션',shared]);
+  const menus=Object.entries(!globalEdit() && appMenus.get(profile)||{}).sort((a,b)=>a[1].localeCompare(b[1]));
+  const byMenu=new Map();
+  for(const [id,label] of menus) {
+    const [top,...rest]=JSON.parse(id.slice(5));
+    if(!byMenu.has(top)) byMenu.set(top,[]);
+    byMenu.get(top).push([id,rest.join(' › ')]);
+  }
+  for(const [top,actions] of byMenu) groups.push(['앱 메뉴 · '+top,actions]);
+  groups.push(['앱 전환',Object.entries(catalog.favorites).map(([id,name])=>['launch.'+id,name+' 열기'])],
+              ['시스템 동작',Object.entries(catalog.systemActions)]);
+  const known=new Set(groups.flatMap(([,entries])=>entries.map(([id])=>id)));
+  const missing=[...new Set(Object.values(currentMappings))].filter(id=>storedActionLabel(id) && !known.has(id));
+  if(missing.length) groups.push(['저장된 배정',missing.map(id=>[id,storedActionLabel(id)])]);
   availableFunctions=new Map(groups.flatMap(([,entries])=>entries));
   $('category').replaceChildren(); $('actionList').replaceChildren();
   for(const [title,entries] of groups) {
@@ -118,6 +206,7 @@ function buildFunctions(profile) {
       choice.dataset.id=id;choice.dataset.category=title;$('actionList').append(choice);
     }
   }
+  buildPicker($('category'),$('groupBar'));
 }
 function fromBinding(value) {
   const note=value.startsWith(notePrefix), action=availableFunctions.has(value);
@@ -130,25 +219,30 @@ function draft() {
   if(!drafts.has(draftKey())) drafts.set(draftKey(),fromBinding(binding(selected)));
   return drafts.get(draftKey());
 }
+function defaultForKey() {return globalEdit()?(/^K0[1-6]$/.test(selected)?'allRecent.'+Number(selected.slice(1)):'none'):state.defaults[selected];}
 function renderMapping() {
   const saved=binding(selected), d=drafts.get(draftKey())||fromBinding(saved);
   for(const [id,b] of buttons) {
     const title=byId.get(id).name+' · '+actionText(binding(id));
     b.title=title; b.setAttribute('aria-label',title);b.setAttribute('aria-pressed',String(id===selected));
     if (id.startsWith('K')) {
-      const assigned = binding(id);
+      const assigned = view==='mapping' ? binding(id) : state.mappings[id];
       b.style.removeProperty('--session-color');
+      delete b.dataset.session;
       const icon = actionIcons[assigned] || (byId.has(assigned) ? 'session' : 'shortcut');
       b.querySelector('img').setAttribute('src', 'assets/' + icon + '.svg');
       b.querySelector('.capLabel').textContent = actionText(assigned);
+      const shared=/^allRecent\.([1-6])$/.exec(assigned);
       const slotBinding = /^(?:recent\.([1-6])|slack\.K0([1-6]))$/.exec(assigned);
       const cmuxSlot = state.profile==='cmux' && /^K0[1-6]$/.test(assigned);
-      if (slotBinding || cmuxSlot) {
-        const index=cmuxSlot ? Number(assigned.slice(1)) : Number(slotBinding[1] || slotBinding[2]);
-        const slot=state.slots[index-1];
+      if (shared || slotBinding || cmuxSlot) {
+        const index=shared ? Number(shared[1]) : cmuxSlot ? Number(assigned.slice(1)) : Number(slotBinding[1] || slotBinding[2]);
+        const slot=(shared ? state.combinedSlots : state.slots)?.[index-1];
+        b.dataset.session='true';
+        b.querySelector('.capLabel').textContent='최근 세션';
+        b.querySelector('img').setAttribute('src','assets/session.svg');
         if(slot?.target) {
-          b.querySelector('.capLabel').textContent=slot.title;
-          b.title+=' · '+slot.title+' · '+slot.state;
+          b.title+=' · '+slot.state;
           b.setAttribute('aria-label',b.title);
           b.dataset.led=slot.led;
           if(slot.lightColor)b.style.setProperty('--session-color',slot.lightColor);
@@ -159,16 +253,16 @@ function renderMapping() {
   }
   $('keyTitle').textContent=selected.startsWith('K')?Number(selected.slice(1))+'번 키':byId.get(selected).name;
   $('keyId').textContent=selected;$('current').textContent=actionText(saved);
-  const locked = state.profile==='unconfigured', desktop = state.profile !== 'cmux';
-  $('actionMode').parentElement.hidden=locked;
+  const desktop = globalEdit() || state.profile !== 'cmux';
+  $('scope').disabled=state.profile==='unconfigured';
+  $('inherit').hidden=globalEdit();
+  $('inherit').disabled=!state.localKeys?.includes(selected);
+  $('current').previousElementSibling.textContent=globalEdit()?'글로벌 배정':state.localKeys?.includes(selected)?'앱 배정':'글로벌에서 상속';
+
   $('current').textContent=actionText(saved);
-  $('noteMode').hidden=!(state.profile==='obsidian' && /^K0[1-6]$/.test(selected));
-  $('noteFields').hidden=locked || d.mode!=='note';
-  if(locked){
-    $('actionFields').hidden=$('chordFields').hidden=true;
-    $('save').disabled=$('restore').disabled=true;
-    return;
-  }
+  $('noteMode').hidden=!( !globalEdit() && state.profile==='obsidian' && /^K0[1-6]$/.test(selected));
+  $('noteFields').hidden=d.mode!=='note';
+  $('reloadMenus').hidden=globalEdit() || !menuProfiles.has(state.profile);
   $('actionMode').textContent='기능';
   $('noteTitle').textContent=d.note?noteTitle(d.note):'문서를 선택하세요';
   $('noteTitle').title=d.note?.slice(notePrefix.length)||'';
@@ -177,24 +271,31 @@ function renderMapping() {
   $('actionMode').setAttribute('aria-pressed',String(d.mode==='action'));$('chordMode').setAttribute('aria-pressed',String(chord));
   $('actionFields').hidden=d.mode!=='action';$('chordFields').hidden=!chord;
   const choices = [...$('actionList').children];
-  const category = categoryOverride || choices.find(b => b.dataset.id === d.action)?.dataset.category;
+  const category = categoryOverride || choices.find(b => b.dataset.id === d.action)?.dataset.category || $('category').options[0]?.value;
   $('category').value = category;
+  $('manageFavorites').hidden=category!=='앱 전환';
   for (const choice of choices) {
-    choice.hidden = choice.dataset.category !== category;
+    const search=$('functionSearch').value.trim().toLocaleLowerCase();
+    choice.hidden = search ? !(choice.dataset.category+' '+choice.textContent).toLocaleLowerCase().includes(search) : choice.dataset.category !== category;
     choice.setAttribute('aria-pressed', String(choice.dataset.id === d.action));
   }
+  $('noActions').hidden=choices.some(b=>!b.hidden) || !$('manageFavorites').hidden;
+  syncPicker($('category'),$('groupBar'));
+  syncPicker($('scope'),$('scopesBar'));
   $('base').value=d.base;
+  syncPicker($('base'),$('baseGrid'));
   for(const b of $('mods').children) { b.setAttribute('aria-pressed',String(d.mods.includes(b.dataset.mod))); }
   const combination=[...catalog.modifiers.filter(m=>d.mods.includes(m)),d.base].join('+');
   const valid=d.base && (desktop || catalog.special.includes(d.base)||d.mods.length);
   $('chord').textContent=!d.base?'':valid?combination:'문자·숫자에는 보조 키를 선택하세요.';
   const value=chord?combination:d.mode==='note'?d.note:d.action;
-  $('save').disabled=!value || value===saved || (chord && !valid);$('save').dataset.value=value;
-  $('restore').disabled=value===state.defaults[selected];
+  $('save').disabled=!value || (value===saved && (globalEdit()?state.explicitGlobal:state.explicitLocal)?.includes(selected)) || (chord && !valid);$('save').dataset.value=value;
+  $('restore').disabled=value===defaultForKey();
+  renderPreview();
 }
 let claudeSignature = '';
 function renderClaudeOptions(next) {
-  const visible = !popup && next.profile === 'claudeCode';
+  const visible = next.profile === 'claudeCode';
   $('claudeSlots').hidden = !visible;
   const options = next.claudeOptions;
   const signature = visible ? JSON.stringify(options) : '';
@@ -223,25 +324,36 @@ function renderClaudeOptions(next) {
 }
 function renderState(next) {
   renderClaudeOptions(next);
-  const mappingsChanged = !state || JSON.stringify(next.slots)!==JSON.stringify(state.slots) || next.profile!==state.profile || JSON.stringify(state.mappings) !== JSON.stringify(next.mappings);
-  if(state?.profile!==next.profile) {categoryOverride='';buildFunctions(next.profile);}
+  const mappingsChanged = !state || JSON.stringify([next.globalMappings,next.localKeys,next.explicitGlobal,next.explicitLocal,next.combinedSlots])!==JSON.stringify([state.globalMappings,state.localKeys,state.explicitGlobal,state.explicitLocal,state.combinedSlots]) || JSON.stringify(next.slots)!==JSON.stringify(state.slots) || next.profile!==state.profile || JSON.stringify(state.mappings) !== JSON.stringify(next.mappings);
+  if(next.profile==='unconfigured') $('scope').value='global';
+  if(state?.profile!==next.profile) {categoryOverride='';$('functionSearch').value='';buildFunctions(next.profile,next.mappings);readMenus(next.profile);}
   if (!state || JSON.stringify(state.profiles)!==JSON.stringify(next.profiles)) {
     $('profile').replaceChildren(...next.profiles.map(p=>new Option(p.name,p.id)));
+    $('profile').add(new Option('글로벌','unconfigured'));
+    buildPicker($('profile'),$('profilesBar'));
     const present=new Set(next.profiles.map(p=>p.id));
     $('manageProfile').replaceChildren(new Option('응용 프로그램 선택…',''),...next.profiles.map(p=>new Option(p.name,p.id)),
       ...catalog.templates.filter(p=>!present.has(p.id)).map(p=>new Option(p.name+' (추가 가능)',p.id)));
     $('manageProfile').value=next.profiles.find(p=>p.id===next.profile)?.id || '';
   }
-  state=next; $('profile').value=next.profile; $('activeName').textContent=next.profiles.find(p=>p.id===next.profile)?.name || '키맵 없음';
+  state=next; $('profile').value=next.profile; $('activeName').textContent=next.profiles.find(p=>p.id===next.profile)?.name || '글로벌';
+  syncPicker($('profile'),$('profilesBar'));
   $('manageProfile').onchange();
   $('auto').textContent='자동 전환 '+(next.automatic?'켬':'끔'); $('auto').setAttribute('aria-pressed',String(next.automatic));
   $('usb').textContent=next.usb;$('cmux').textContent=next.cmux;
   $('usb').title=next.usb;$('cmux').title=next.cmux;
   $('connect').disabled=next.busy;
   $('lightStatus').textContent=next.lightingStatus;
-  for(const [i,s] of next.slots.entries()){
-    const b=slotButtons[i];b.dataset.target=s.target;b.disabled=!s.target||next.busy;
-    b.children[1].textContent=s.title||'빈 슬롯';b.children[2].textContent=s.active?'선택됨 · '+s.state:s.state;b.children[2].dataset.led=s.led;
+  for(const [i,local] of next.slots.entries()){
+    const input='K'+String(i+1).padStart(2,'0');
+    const value=next.mappings[input] || '';
+    const shared=/^allRecent\.([1-6])$/.exec(value);
+    const perApp=/^(?:recent\.|K0)([1-6])$/.exec(value);
+    const s=shared ? next.combinedSlots[Number(shared[1])-1] || {} : perApp ? next.slots[Number(perApp[1])-1] : next.profile==='slack'?local:{};
+
+    liveSlots[i]=s;
+    const b=slotButtons[i];b.dataset.target=s.target||'';b.disabled=!s.target||next.busy;
+    b.children[1].textContent=s.title||'빈 슬롯';b.children[2].textContent=s.active?'선택됨 · '+s.state:s.state||'';b.children[2].dataset.led=s.led;
     b.title=s.title;
     b.children[0].classList.toggle('coloredSlot',!!s.lightColor);
     b.children[0].style.setProperty('--slot-dot',s.lightColor || 'transparent');
@@ -269,20 +381,56 @@ for(const [zone,title] of [['slot','슬롯 LED'],['ambient','바닥 조명']]) {
     const key=$('lightState').value;
     const rule=lightDrafts.get(key) || structuredClone(lightRules[key]);
     rule[zone]={color:color.value.toUpperCase(),effect:Number(effect.value)};
-    lightDrafts.set(key,rule); $('saveLight').disabled=savingLight;
+    lightDrafts.set(key,rule); renderPreview(); $('saveLight').disabled=savingLight;
   };
-  lightInputs[zone]={color,effect};row.append(label,color,effect);$('lightZones').append(row);
+  const styles=group('effectChoices pills');
+  styles.setAttribute('role','group');
+  styles.setAttribute('aria-label',title+' 애니메이션');
+  effect.hidden=true;
+  buildPicker(effect,styles);
+  effect.addEventListener('change',()=>syncPicker(effect,styles));
+  lightInputs[zone]={color,effect,styles};row.append(label,color,effect,styles);$('lightZones').append(row);
+}
+function paintLamp(lamp,style) {
+  lamp.dataset.effect=String(style?.effect ?? 0);
+  lamp.style.setProperty('--lamp-color',style?.color || 'transparent');
+}
+function renderPreview() {
+  if(!state) return;
+  const sample=simulating(), key=$('lightState').value;
+  const rule=sample && (lightDrafts.get(key) || lightRules?.[key]);
+  const priority=['작업공간 입력 요청','작업공간 실행 중','작업공간 완료','현재 터미널','대기','상태 미확인','빈 슬롯'];
+  const ambientState=liveSlots.find(s=>s.active && s.target)?.state ||
+    priority.find(name=>liveSlots.some(s=>s.target && s.state===name)) || '빈 슬롯';
+  paintLamp($('underglow'),sample ? rule?.ambient : lightRules?.[ambientState]?.ambient);
+  for(const [id,b] of buttons) {
+    const i=/^K0[1-6]$/.test(id)?Number(id.slice(1))-1:-1;
+    const slot=liveSlots[i];
+    b.disabled=view==='sessions' ? !slot?.target || state.busy : view==='device' && (!sample || i<0);
+    if(view!=='mapping') b.setAttribute('aria-pressed',String(sample ? id===previewKey : !!slot?.active));
+    const lamp=b.querySelector('.lamp');
+    if(!lamp) continue;
+    const live=slot?.target && (lightRules?.[slot.state]?.slot || {color:slot.lightColor,effect:slot.lightColor && slot.lightColor!=='transparent'?1:0});
+    paintLamp(lamp,sample ? (id===previewKey ? rule?.slot : null) : view==='mapping' ? null : live);
+  }
+  $('board').classList.toggle('simulation',sample);
+  $('previewCaption').hidden=view==='mapping';
+  $('previewCaption').textContent=sample ? Number(previewKey.slice(1))+'번 키 · '+key+' 미리보기' : '현재 세션 조명';
 }
 function renderLights() {
+  syncPicker($('lightState'),$('lightBar'));
   const key=$('lightState').value, rule=lightDrafts.get(key) || lightRules[key];
   for(const [zone,inputs] of Object.entries(lightInputs)){
     inputs.color.value=rule[zone].color;inputs.effect.value=rule[zone].effect;
+    syncPicker(inputs.effect,inputs.styles);
   }
   $('saveLight').disabled=savingLight;
+  renderPreview();
 }
 async function loadLights(){
   lightRules=(await api('readLighting')).rules;
   $('lightState').replaceChildren(...Object.keys(lightRules).sort().map(name=>new Option(name,name)));
+  buildPicker($('lightState'),$('lightBar'));
   renderLights();
 }
 $('lightState').onchange=renderLights;
@@ -314,17 +462,29 @@ async function device(save){
 }
 $('profile').onchange=async e=>{try{renderState(await api('activateProfile',{profile:e.target.value}));}catch(err){fail(err);}};
 $('auto').onclick=async()=>{try{renderState(await api('toggleAuto'));}catch(err){fail(err);}};
+function settingsPanel(id) {
+  for (const tab of document.querySelectorAll('[data-panel]')) {
+    const selected=tab.dataset.panel===id;
+    tab.setAttribute('aria-pressed',String(selected));
+    $(tab.dataset.panel).hidden=!selected;
+  }
+  renderPreview();
+}
+for(const tab of document.querySelectorAll('[data-panel]')) tab.onclick=()=>settingsPanel(tab.dataset.panel);
+settingsPanel('hardware');
 function show(name){
   view=name;
+  if(name==='device' && catalog) refreshFavoritePicker();
   for(const v of ['mapping','sessions','device']) $(v).hidden=v!==view;
   for(const b of document.querySelectorAll('[data-view]')) {
     if(b.dataset.view===view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');
   }
   if(view==='device'&&!prefs)device(false);
-  if(view==='device'&&!lightRules)loadLights().catch(fail);
+  if(view!=='mapping'&&!lightRules)loadLights().catch(fail);
+  if(state)renderMapping();
 }
 for(const b of document.querySelectorAll('[data-view]'))b.onclick=()=>show(b.dataset.view);
-$('openEditor').onclick=()=>popup?api('editor',{view:'mapping'}):show('mapping');
+$('openEditor').onclick=()=>show('mapping');
 $('noteMode').onclick=()=>{draft().mode='note';renderMapping();};
 $('chooseNote').onclick=async()=>{
   const key=draftKey(), d=draft();
@@ -335,12 +495,21 @@ $('chooseNote').onclick=async()=>{
 };
 $('actionMode').onclick=()=>{draft().mode='action';renderMapping();};
 $('chordMode').onclick=()=>{draft().mode='chord';renderMapping();};
-$('category').onchange=e=>{categoryOverride=e.target.value;renderMapping();};
+$('manageFavorites').onclick=()=>{show('device');settingsPanel('apps');$('favoriteApp').focus();};
+$('functionSearch').oninput=renderMapping;
+$('reloadMenus').onclick=()=>readMenus(state.profile);
+$('category').onchange=e=>{$('functionSearch').value='';categoryOverride=e.target.value;renderMapping();};
 $('base').onchange=e=>{draft().base=e.target.value;renderMapping();};
-$('restore').onclick=()=>{categoryOverride=''; drafts.set(draftKey(),fromBinding(state.defaults[selected]));renderMapping();};
+$('scope').onchange=()=>{categoryOverride='';$('functionSearch').value='';buildFunctions(state.profile);renderMapping();};
+$('inherit').onclick=async()=>{
+  const key=draftKey();
+  try {const next=await api('save',{profile:state.profile,input:selected,binding:'inherit'});drafts.delete(key);renderState(next);renderMapping();}
+  catch(error){fail(error);}
+};
+$('restore').onclick=()=>{categoryOverride=''; drafts.set(draftKey(),fromBinding(defaultForKey()));renderMapping();};
 $('save').onclick=async()=>{
   const input=selected, profile=state.profile, key=draftKey();
-  try{const next=await api('save',{input,profile,binding:$('save').dataset.value});drafts.delete(key);renderState(next);announce('매핑을 저장했습니다.');}
+  try{const next=await api('save',{input,profile,scope:$('scope').value,binding:$('save').dataset.value});drafts.delete(key);renderState(next);announce('매핑을 저장했습니다.');}
   catch(e){fail(e);}
 };
 document.addEventListener('keydown',e=>{if(e.metaKey&&e.key==='s'){e.preventDefault();if(view==='mapping')$('save').click();else if(view==='device')$('savePrefs').click();}});
@@ -371,4 +540,18 @@ for(const method of ['addProfile','removeProfile']) $(method).onclick=async()=>{
     const result=await api(method,{profile:$('manageProfile').value});
     if(result){drafts.clear();renderState(result);renderMapping();}
   }catch(error){fail(error);}
+};
+
+$('favoriteApp').onchange=()=>{
+  const exists=Object.hasOwn(catalog.favorites,$('favoriteApp').value);
+  $('addFavorite').disabled=exists;
+  $('removeFavorite').disabled=!exists;
+};
+for(const method of ['addFavorite','removeFavorite']) $(method).onclick=async()=>{
+  try {
+    const result=await api(method,{profile:$('favoriteApp').value});
+    if(!result)return;
+    catalog.favorites=result;
+    fillFavoritePicker();buildFunctions(state.profile);renderMapping();
+  } catch(error){fail(error);}
 };

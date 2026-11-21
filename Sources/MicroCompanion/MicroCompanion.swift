@@ -44,7 +44,7 @@ import MicroCore
     private var enabled = KeyMap.preferences.stringArray(forKey:"enabledAppProfiles")?.compactMap(AppProfile.init(rawValue:)).filter(\.selectable) ?? AppProfile.initial
     private func title(_ p:AppProfile) -> String {
         if case .application(let bundle) = p, let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:bundle) { return url.deletingPathExtension().lastPathComponent }
-        return p.title
+        return p == .unconfigured ? "글로벌" : p.title
     }
     private var profileList:[[String:String]] { enabled.map { ["id":$0.rawValue,"name":title($0)] } }
     private func storeEnabled() { KeyMap.preferences.set(enabled.map(\.rawValue),forKey:"enabledAppProfiles") }
@@ -52,8 +52,8 @@ import MicroCore
     private var focusObserver: NSObjectProtocol?
     var feedback = ""
 
-    private func hud(_ subtitle: String) {
-        let event = ["event":"hud", "title":title(profile), "subtitle":subtitle]
+    private func hud(_ subtitle: String, changes:[[String:String]] = []) {
+        let event:[String:Any] = ["event":"hud", "title":title(profile), "subtitle":subtitle,"keys":changes]
         if var bytes = try? JSONSerialization.data(withJSONObject:event) {
             bytes.append(10)
             FileHandle.standardOutput.write(bytes)
@@ -67,14 +67,28 @@ import MicroCore
         if profile == .claudeCode { ClaudeCodeHook.endLease() }
         if next == .claude || next == .claudeCode { KeyMap.preferences.set(next.rawValue, forKey:"preferredClaudeProfile") }
         if profile == .slack { slackQueue.removeAll(); slackTask?.cancel(); SlackDesktop.clearSlots() }
+        let previous = profile
+        if profile.hasRecentSessions { backgroundSessions[profile]=sessions.compactMap{$0} }
         profile = next
         sessionStatus = next.title
         sessionGeneration = UUID()
-        sessions = []
+        sessions = (backgroundSessions[next] ?? []).map { $0 }
         updateLights()
         refreshDesktop()
         KeyMap.preferences.set(next.rawValue, forKey:"selectedKeyMap")
-        if notify { hud("현재 키맵") }
+        if notify {
+            let changes = KeyMap.controls.compactMap { key -> [String:String]? in
+                let value = binding(key,in:next)
+                let old = binding(key,in:previous)
+                guard value != old || next.agentActions[value] != previous.agentActions[old] ||
+                    (recentIndex(value) != nil && previous != next) else { return nil }
+                let label = next.agentActions[value] ?? MacActions.system[value] ?? ApplicationMenu.path(value)?.last ??
+                    MacActions.appID(value).map { MacActions.favorites[$0] ?? $0 } ?? (value == "none" ? "미할당" : KeyMap.label(value))
+                let name = commonIndex(value).map { "통합 최근 세션 "+String($0+1) } ?? ObsidianNote.path(value).map { URL(fileURLWithPath:$0).deletingPathExtension().lastPathComponent } ?? label
+                return ["key":key,"name":name]
+            }
+            if !changes.isEmpty { hud("키맵 전환", changes:changes) }
+        }
     }
     private func follow(_ bundle: String?, notify: Bool = true) {
         guard automatic, let bundle else { return }
@@ -83,6 +97,8 @@ import MicroCore
             activate(.claudeCode,notify:notify)
         } else if let next = enabled.first(where: { $0.bundleIDs.contains(bundle) }) {
             activate(next,notify:notify)
+        } else if !["local.kent.microcmux","com.github.Electron"].contains(bundle) {
+            activate(.unconfigured,notify:notify)
         }
     }
     private func toggleAutomatic() {
@@ -91,18 +107,23 @@ import MicroCore
         follow(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, notify:false)
         hud(automatic ? "자동 전환 켬" : "자동 전환 끔")
     }
-    private func binding(_ input: String, in p: AppProfile) -> String {
-        if p == .cmux { return cmuxMappings[input] ?? input }
-        return profiles[p.rawValue]?[input] ?? p.defaultBinding(input)
+    private var global = KeyMap.preferences.dictionary(forKey:"globalBindings") as? [String:String] ?? [:]
+    private func commonIndex(_ value:String) -> Int? {
+        (1...6).first { value == "allRecent."+String($0) }.map { $0-1 }
     }
-    private func save(_ value: String, for input: String, in p: AppProfile) {
-        if p == .cmux {
-            cmuxMappings[input] = value == input ? nil : value
-
-        } else {
-            profiles[p.rawValue, default: [:]][input] = value == p.defaultBinding(input) ? nil : value
-
-        }
+    private func globalDefault(_ key:String) -> String {
+        guard let index=KeyMap.keys.prefix(6).firstIndex(of:key) else { return "none" }
+        return "allRecent."+String(index+1)
+    }
+    private func localValue(_ key:String, _ p:AppProfile) -> String? {
+        KeyMap.localBinding(key,profile:p,saved:p == .cmux ? cmuxMappings[key] : profiles[p.rawValue]?[key],global:global[key])
+    }
+    private func binding(_ key:String, in p:AppProfile) -> String {
+        localValue(key,p) ?? global[key] ?? globalDefault(key)
+    }
+    private func save(_ value:String, for input:String, in p:AppProfile) {
+        if p == .cmux { cmuxMappings[input] = value }
+        else { profiles[p.rawValue,default:[:]][input] = value }
         KeyMap.preferences.set(exportMaps,forKey:"keymapOverridesV1")
     }
     private var exportMaps: [String:[String:String]] {
@@ -157,7 +178,11 @@ import MicroCore
             if let pin=claudePins[String(slot)] { return items.first(where:{$0.item.url.absoluteString == pin})?.item }
             return remaining.next()?.item
         }
-        sessions = sessions.map { $0.map(indicator) }
+        sessions = sessions.map { slot in slot.map { item in
+            var row=indicator(item)
+            row.updated=(items.first { $0.item.url==item.url }?.updated ?? 0)/1000
+            return row
+        } }
         if !items.contains(where:{$0.item.url == selectedClaudeCode}) { selectedClaudeCode = nil }
         sessionStatus = profile.title + " · 슬롯 " + String(sessions.compactMap{$0}.count) + "/6"
         updateLights()
@@ -210,6 +235,7 @@ import MicroCore
                         completions.markViewed(visibleCodex.absoluteString)
                     }
                 }
+                if source == .claude { observeClaude(items) }
                 sessions = items.map(indicator)
                 sessionStatus = source.title + " · 슬롯 " + String(items.count) + "/6"
             } catch {
@@ -240,21 +266,109 @@ import MicroCore
         rules[SessionLight.empty.rawValue] = .init(slot:.init(color:empty.slot.color,effect:0),ambient:empty.ambient)
         return SessionLighting(rules:rules)
     }
-    private func updateLights() {
-        if profile == .cmux { device?.display(lights, selected: rows.firstIndex { $0?.active == true }, palette:palette); return }
-        let states: [SessionLight] = KeyMap.keys.prefix(6).map { key in
-            guard let index = recentIndex(binding(key,in:profile)), sessions.indices.contains(index) else { return .empty }
-            return sessions[index]?.light ?? .empty
+    private struct CombinedSlot {
+        let source:AppProfile
+        let item:DesktopSession
+        var surface:CmuxTarget? = nil
+        var id:String { source.rawValue+"/"+(surface?.id.uuidString ?? item.url.absoluteString) }
+    }
+    private var backgroundSessions = [AppProfile:[DesktopSession]]()
+    private var collecting = false
+    private var seen = KeyMap.preferences.dictionary(forKey:"observedSessionTimes") as? [String:Double] ?? [:]
+    private var claudeHead:URL?
+    private func recordVisit(_ id:String) {
+        seen[id]=Date().timeIntervalSince1970
+        if seen.count>128, let oldest=seen.min(by:{ $0.value < $1.value }) { seen[oldest.key]=nil }
+        KeyMap.preferences.set(seen,forKey:"observedSessionTimes")
+    }
+    private func observeClaude(_ items:[DesktopSession]) {
+        guard let head=items.first?.url else { return }
+        if let previous=claudeHead, previous != head { recordVisit("claude/"+head.absoluteString) }
+        claudeHead=head
+    }
+    private var observedCmux:UUID?
+    private func refreshCombined() {
+        guard !collecting else { return }
+        collecting=true
+        let sources=enabled.filter { $0.hasRecentSessions && $0 != profile }
+        Task {
+            let items = await Task.detached {
+                var result=[AppProfile:[DesktopSession]]()
+                for source in sources {
+                    if source == .claudeCode {
+                        result[source]=ClaudeCodeSessions.read().prefix(6).map { session in
+                            var item=session.item; item.updated=session.updated/1000; return item
+                        }
+                    } else { result[source]=(try? DesktopSessions.read(source)) ?? [] }
+                }
+                return result
+            }.value
+            for (source,items) in items where source != profile {
+                if source == .claude { observeClaude(items) }
+                backgroundSessions[source]=items.map(indicator)
+            }
+            collecting=false
+            updateLights()
         }
-        let selectedKey = selectedSession.flatMap { selected in
-            KeyMap.keys.prefix(6).firstIndex { key in
-                guard let index = recentIndex(binding(key,in:profile)), sessions.indices.contains(index) else { return false }
-                return sessions[index]?.url == selected
+    }
+    private var combined:[CombinedSlot] {
+        var result=[CombinedSlot]()
+        for source in enabled where source.hasRecentSessions {
+            let items = source == profile ? sessions.compactMap{$0} : backgroundSessions[source] ?? []
+            for item in items {
+                result.append(CombinedSlot(source:source,item:item))
             }
         }
-        let palette = slotPalette
-        let breathing = profile == .codex ? (palette ?? .initial).breathingSlot(states:states,viewed:selectedKey) : nil
-        device?.display(states,selected:selectedKey,palette:palette,firmwareSlot:breathing)
+        if enabled.contains(.cmux) {
+            for (index,row) in rows.enumerated() {
+                guard let row else { continue }
+                let item=DesktopSession(url:URL(fileURLWithPath:row.id.uuidString),title:row.title,light:lights[index],updated:seen[row.id.uuidString] ?? 0)
+                result.append(CombinedSlot(source:.cmux,item:item,surface:row))
+            }
+        }
+        return Array(result.enumerated().sorted { a,b in
+            let left=max(a.element.item.updated,seen[a.element.id] ?? 0)
+            let right=max(b.element.item.updated,seen[b.element.id] ?? 0)
+            return left == right ? a.offset < b.offset : left > right
+        }.prefix(6).map(\.element))
+    }
+    private func openCombined(_ slot:CombinedSlot) async throws {
+        if let surface=slot.surface {
+            try await Task.detached { try CmuxClient.focus(surface) }.value
+            remember(surface.id)
+        } else { try await openSession(slot.item,source:slot.source) }
+        recordVisit(slot.id)
+        updateLights()
+    }
+    private func combinedRow(_ slot:CombinedSlot) -> [String:Any] {
+        let light=slot.item.light
+        return ["target":"combined:"+slot.id,"title":title(slot.source)+" · "+slot.item.title,
+                "active":slot.source==profile && (slot.surface?.active ?? (selectedSession==slot.item.url)),
+                "state":light.rawValue,"led":light.agentCode,"lightColor":(palette ?? .initial).rules[light.rawValue]?.slot.color ?? ""]
+    }
+    private func updateLights() {
+        let shared=combined
+        var selected:Int?
+        let states:[SessionLight]=KeyMap.keys.prefix(6).enumerated().map { position,key in
+            let value=binding(key,in:profile)
+            if let i=commonIndex(value), shared.indices.contains(i) {
+                let slot=shared[i]
+                if slot.source==profile && (slot.surface?.active ?? (slot.item.url==selectedSession)) { selected=position }
+                return slot.item.light
+            }
+            if profile == .cmux, let i=KeyMap.keys.prefix(6).firstIndex(of:value) {
+                if rows[i]?.active == true { selected=position }
+                return lights[i]
+            }
+            if let i=recentIndex(value), sessions.indices.contains(i), let item=sessions[i] {
+                if item.url==selectedSession { selected=position }
+                return item.light
+            }
+            return .empty
+        }
+        let style=slotPalette
+        let breathing=(style ?? .initial).breathingSlot(states:states,viewed:selected)
+        device?.display(states,selected:selected,palette:style,firmwareSlot:breathing)
     }
     private func recentIndex(_ value:String) -> Int? { (1...6).first { value == "recent."+String($0) }.map { $0-1 } }
     private var queue: [(DeckInput, CmuxTarget?, String?)] = []
@@ -262,8 +376,51 @@ import MicroCore
         let code = KeyMap.code(physical)
         // Rotation is a detent, so a held binding must finish within this event.
         defer { if case .turn = physical { release(physical) } }
-        guard profile != .unconfigured else { return }
+
         let binding = binding(code, in:profile)
+        if let index = commonIndex(binding) {
+            let combined=self.combined
+            guard combined.indices.contains(index) else { hud("빈 세션 슬롯"); return }
+            let slot = combined[index]
+            let diagnostics=CommandLine.arguments.contains("--agent-diagnostics")
+            if diagnostics { fputs("slot "+code+" "+slot.id+" "+slot.item.light.rawValue+"\n",stderr) }
+            Task {
+                do {
+                    try await openCombined(slot)
+                    if diagnostics {
+                        try await Task.sleep(nanoseconds:650_000_000)
+                        let front=NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+                        var visible:String?
+                        if slot.source == .cmux { visible=try? CmuxClient.focusedID().uuidString }
+                        else if slot.source == .codex { visible=DesktopSessions.visibleCodexSession(in:[slot.item])?.absoluteString }
+                        else if slot.source == .t3 { visible=T3Controls.visibleRoute()?.absoluteString }
+                        fputs("opened "+code+" "+front+" "+(visible ?? "unknown")+"\n",stderr)
+                    }
+                } catch { hud(error.localizedDescription) }
+            }
+            return
+        }
+        if localValue(code,profile) == nil, DesktopShortcut.valid(binding),
+           let id = NSWorkspace.shared.frontmostApplication?.bundleIdentifier {
+            do { try DesktopShortcut.send(binding,to:.application(id)) } catch { hud(error.localizedDescription) }
+            return
+        }
+        if binding == "none" { return }
+        if let id = MacActions.appID(binding) {
+            Task {
+                do { try await MacActions.launch(id); feedback = "" }
+                catch { feedback = error.localizedDescription; hud(feedback) }
+            }
+            return
+        }
+        if MacActions.system[binding] != nil || ApplicationMenu.path(binding) != nil {
+            do {
+                if let path = ApplicationMenu.path(binding) { try ApplicationMenu.perform(path,profile:profile) }
+                else { try MacActions.perform(binding) }
+                feedback = ""
+            } catch { feedback = error.localizedDescription; hud(feedback) }
+            return
+        }
         if profile == .cmux, binding == "K11" || binding == "space" {
             cmuxSpace.press(code) { [weak self] in self?.feedback = $0 }
             return
@@ -322,6 +479,7 @@ import MicroCore
             guard action != .knobPress else { return }
             enqueue(action)
         }
+        else if AppProfile.cmux.agentActions[binding] != nil { enqueue(physical,chord:binding) }
         else if let chord = FunctionKey.shortcut(binding) { enqueue(physical, chord: chord) }
     }
     private var t3Busy = false
@@ -400,7 +558,7 @@ import MicroCore
     private var timer: Timer?
 
     func start() {
-        if !enabled.contains(profile) { activate(enabled.first ?? .unconfigured,notify:false) }
+        if profile != .unconfigured, !enabled.contains(profile) { activate(enabled.first ?? .unconfigured,notify:false) }
         guard timer == nil else { return }
         focusObserver = NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didActivateApplicationNotification, object:nil, queue:.main) { [weak self] note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
@@ -456,7 +614,8 @@ import MicroCore
     func refresh() {
         if profile == .claudeCode, deviceStatus.hasPrefix("USB 연결됨") { ClaudeCodeHook.heartbeat() }
         refreshDesktop()
-        guard profile == .cmux else { return }
+        refreshCombined()
+        guard enabled.contains(.cmux) else { return }
         guard !refreshing, !selecting, !connecting else { return }
         let token = epoch
         refreshing = true
@@ -465,12 +624,16 @@ import MicroCore
             do {
                 let live = try await Task.detached { try CmuxClient.list() }.value
                 guard epoch == token, !selecting else { return }
-                if let active = live.first(where: \.active) { remember(active.id) }
+                if let active = live.first(where: \.active), NSWorkspace.shared.frontmostApplication?.bundleIdentifier == AppProfile.cmux.bundleIDs.first {
+                    if observedCmux != active.id { recordVisit(active.id.uuidString); observedCmux = active.id }
+                    remember(active.id)
+                } else { observedCmux = nil }
                 let recent = Deck.recent(live: live, history: history)
                 rows = (0..<6).map { $0 < recent.count ? recent[$0] : nil }
                 let current = rows
+                let syncBindings = profile == .cmux
                 let states = await Task.detached {
-                    CodexBinding.refresh(live)
+                    if syncBindings { CodexBinding.refresh(live) }
                     var signals: [UUID: WorkspaceSignal] = [:]
                     for group in Dictionary(grouping: current.compactMap { $0 }, by: \.workspace).values {
                         if let target = group.first { signals[target.workspace] = try? CmuxClient.signal(target) }
@@ -502,7 +665,7 @@ import MicroCore
     struct Request: Decodable {
         let id: Int
         let method: String
-        let input, binding, target, profile: String?
+        let input, binding, target, profile, scope: String?
         let volume, sleep: Int?
         let archive: KeymapArchive?
         let revision: UInt32?
@@ -539,6 +702,11 @@ import MicroCore
         let lightStatus = device?.lightingStatus ?? ""
         return ["profiles":profileList, "claudeOptions":claudeOptions(), "lightingStatus": lightStatus.isEmpty ? "USB 연결 대기" : lightStatus, "slots": slots, "usb": deviceStatus, "cmux": profile.hasRecentSessions ? sessionStatus : (profile == .cmux ? cmuxStatus : profile.title), "feedback": feedback,
                 "profile": profile.rawValue, "automatic":automatic,
+                "globalMappings":Dictionary(uniqueKeysWithValues:KeyMap.controls.map { ($0,global[$0] ?? globalDefault($0)) }),
+                "explicitGlobal":Array(global.keys).sorted(),
+                "explicitLocal":(profile == .cmux ? cmuxMappings : profiles[profile.rawValue] ?? [:]).filter { $0.value != "inherit" }.keys.sorted(),
+                "localKeys":KeyMap.controls.filter { localValue($0,profile) != nil },
+                "combinedSlots":combined.map { combinedRow($0) },
                 "mappings": Dictionary(uniqueKeysWithValues: KeyMap.controls.map { ($0, binding($0, in:profile)) }),
                 "defaults": Dictionary(uniqueKeysWithValues: KeyMap.controls.map { ($0, profile.defaultBinding($0)) }), "busy": selecting || connecting]
     }
@@ -593,13 +761,14 @@ import MicroCore
                 rebuildClaudeSlots()
                 result["value"] = state()
             case "exportMaps":
-                guard !enabled.isEmpty else { throw CompanionError("내보낼 키맵이 없습니다.") }
-                var archive:[String:Any] = ["version":1,"profiles":exportMaps]
+
+                var archive:[String:Any] = ["version":2,"profiles":exportMaps,"global":global]
                 if enabled.contains(.claudeCode) { archive["claudeSlots"]=["source":claudeSource,"pins":claudePins] as [String:Any] }
                 result["value"]=archive
             case "importMaps":
                 guard let archive=r.archive else { throw CompanionError("키맵 파일 형식을 확인하세요.") }
                 try archive.validate()
+                if let values=archive.global { global=values; KeyMap.preferences.set(global,forKey:"globalBindings") }
                 if let slots = archive.claudeSlots {
                     claudeSource = slots.source
                     claudePins = slots.pins
@@ -618,9 +787,19 @@ import MicroCore
                 KeyMap.preferences.set(exportMaps,forKey:"keymapOverridesV1")
                 updateLights()
                 result["value"]=state()
+            case "appMenus":
+                guard let id=r.profile, let app=AppProfile(rawValue:id) else { throw CompanionError("대상 앱을 선택하세요.") }
+                result["value"] = await Task.detached { ApplicationMenu.list(app) }.value
+            case "runningApps": result["value"] = MacActions.runningApps()
+            case "addFavorite":
+                try MacActions.register(path:r.target,id:r.profile)
+                result["value"] = MacActions.favorites
+            case "removeFavorite":
+                if let id=r.profile { MacActions.favorites[id] = nil }
+                result["value"] = MacActions.favorites
             case "catalog":
                 result["value"] = ["profiles": profileList, "templates":AppProfile.allCases.map { ["id":$0.rawValue,"name":$0.title] }, "controls": KeyMap.controls.map { ["id": $0, "name": KeyMap.name($0), "action": KeyMap.label($0)] },
-                                   "agentActions": Dictionary(uniqueKeysWithValues: AppProfile.allCases.map { ($0.rawValue,$0.agentActions) }), "slackActions": zip(SlackAction.inputs,SlackAction.labels).map { ["id":"slack."+$0.0,"name":$0.1] }, "modifiers": FunctionKey.modifiers, "special": FunctionKey.specialKeys] as [String: Any]
+                                   "agentActions": Dictionary(uniqueKeysWithValues: AppProfile.allCases.map { ($0.rawValue,$0.agentActions) }), "systemActions":MacActions.system, "favorites":MacActions.favorites, "slackActions": zip(SlackAction.inputs,SlackAction.labels).map { ["id":"slack."+$0.0,"name":$0.1] }, "modifiers": FunctionKey.modifiers, "special": FunctionKey.specialKeys] as [String: Any]
             case "addProfile":
                 let next:AppProfile
                 if let path=r.target, path.hasSuffix(".app"), let id=Bundle(url:URL(fileURLWithPath:path))?.bundleIdentifier {
@@ -645,12 +824,18 @@ import MicroCore
                 if profile==p {activate(enabled.first ?? .unconfigured)}
                 result["value"]=state()
             case "activateProfile":
-                guard let id = r.profile, let next = AppProfile(rawValue:id), enabled.contains(next) else { throw CompanionError("알 수 없는 키맵") }
+                guard let id = r.profile, let next = AppProfile(rawValue:id), (enabled.contains(next) || next == .unconfigured) else { throw CompanionError("알 수 없는 키맵") }
                 activate(next)
                 result["value"] = state()
             case "toggleAuto":
                 toggleAutomatic()
                 result["value"] = state()
+            case "save" where r.scope == "global":
+                guard let key=r.input, KeyMap.controls.contains(key), let value=r.binding, KeymapArchive.common(value) else { throw CompanionError("글로벌 배정을 확인하세요.") }
+                global[key]=value
+                KeyMap.preferences.set(global,forKey:"globalBindings")
+                updateLights()
+                result["value"]=state()
             case "save":
                 guard let id = r.profile, let p = AppProfile(rawValue:id), enabled.contains(p),
                       let input = r.input, KeyMap.controls.contains(input),
@@ -663,6 +848,7 @@ import MicroCore
                 result["value"] = state()
             case "select":
                 guard r.profile == profile.rawValue else { throw CompanionError("키맵이 변경되었습니다.") }
+                if let slot=combined.first(where:{ "combined:"+$0.id == r.target }) { try await openCombined(slot); break }
                 if profile == .slack {
                     guard let slot = SlackDesktop.slots.first(where:{$0.conversation.deepLink.absoluteString == r.target}) else { throw CompanionError("Slack 대화 목록이 변경되었습니다.") }
                     try await SlackDesktop.open(slot.conversation)

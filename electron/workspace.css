@@ -1,0 +1,110 @@
+body {height:100vh;min-height:0;}
+main,.mapping,.canvas,aside {min-height:0;min-width:0;}
+main {overflow:hidden;}
+.mapping {grid-template-columns:minmax(315px,.85fr) minmax(470px,1.4fr);}
+.canvas,aside {padding:24px clamp(18px,2.2vw,34px);}
+.canvas .section-title {min-height:0;display:block;}
+.canvas h1 {font-size:36px;}
+.profileControls {position:static;display:flex;flex-direction:column;align-items:flex-start;margin:14px 0;gap:6px;}
+.pills,.settingTabs {display:flex;flex-wrap:wrap;gap:5px;}
+.pills .pick,.settingTabs button {border:1px solid var(--line);border-radius:7px;padding:6px 10px;font-size:13px;font-weight:560;color:#c6c6c6;background:#262626;}
+.pills .pick[aria-pressed=true],.settingTabs button[aria-pressed=true] {background:#393939;color:#e6e6e6;border-color:#777777;}
+.profileControls #auto {padding-left:0;}
+.stage {min-height:220px;}
+.stage .board {max-width:min(100%,45vh);}
+aside {gap:10px;overflow:auto;}
+aside .section-title {min-height:0;padding-bottom:9px;}
+aside .section-title h2 {font-size:30px;}
+.layerTools {margin:0;justify-content:space-between;}
+#actionFields {min-height:145px;display:flex;flex-direction:column;flex:1;}
+.functionTools {margin:0 0 9px;}
+.library {display:grid;grid-template-columns:minmax(120px,.65fr) minmax(190px,1.35fr);border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:1;min-height:0;background:#1b1b1b;}
+.groupBar,.results {min-width:0;overflow:auto;scrollbar-width:thin;padding:6px;}
+.groupBar {border-right:1px solid var(--line);background:#1a1a1a;}
+.groupBar .pick,.choice {width:100%;text-align:left;border-radius:5px;padding:8px 10px;line-height:1.3;}
+.groupBar .pick {font-size:13px;color:#c1c1c1;}
+.groupBar .pick[aria-pressed=true] {color:#e6e6e6;background:#383838;}
+.pick:hover:not(:disabled),.settingTabs button:hover {background:#383838;}
+#actionList {margin:0;overflow:visible;max-height:none;}
+#noActions {margin:12px;color:var(--muted);}
+#chordFields {min-height:150px;overflow:auto;}
+#baseGrid h3 {font-size:12px;color:var(--muted);margin:10px 0 5px;}
+.keyGrid {display:flex;flex-wrap:wrap;gap:4px;}
+.keyGrid .pick {min-width:32px;border:1px solid #4f4f4f;background:#2a2a2a;border-radius:5px;padding:5px 8px;font:550 12px/16px ui-monospace,monospace;}
+.keyGrid .pick[aria-pressed=true] {background:#404040;border-color:var(--cyan);color:#ececec;}
+.editFoot {display:flex;gap:12px;align-items:center;justify-content:space-between;flex-shrink:0;padding-top:10px;border-top:1px solid var(--line);}
+.editFoot .current {padding:0;margin:0;border:0;min-width:0;overflow-wrap:anywhere;}
+.editFoot .actions {flex-shrink:0;}
+#device,#sessions {height:100%;overflow:auto;width:100%;max-width:1050px;}
+.simple .section-title {min-height:78px;}
+.settingTabs {padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:16px;}
+.settingTabs button {padding:9px 18px;}
+.settingPanel .pref:first-child {border-top:0;}
+#lighting {margin:0;border:0;padding:0;}
+#lightBar {margin:0 0 18px;}
+#apps {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;}
+#apps .pref {display:block;border:0;}
+#apps .actions {margin-top:10px;flex-wrap:wrap;}
+#apps select {flex-basis:100%;padding:6px;min-height:220px;}
+#apps option {padding:4px 8px;}
+#apps button,#files button {border:1px solid var(--line);border-radius:6px;padding:6px 12px;}
+footer {flex:none;}
+@media(max-height:710px){.canvas,aside{padding-block:12px;}aside{gap:6px;}.profileControls{margin:7px 0;}.editFoot .current span{margin:0;}}
+.lightRow {grid-template-columns:100px 42px 1fr;gap:14px;padding:14px 0;}
+.effectChoices .pick {font-size:12px;}
+
+main {display:grid;grid-template-columns:minmax(315px,.85fr) minmax(470px,1.4fr);}
+.canvas {grid-column:1;grid-row:1;}
+#mapping,#sessions,#device {grid-column:2;grid-row:1;min-width:0;}
+#sessions,#device {margin:0;padding:24px clamp(18px,2.2vw,34px);border-left:1px solid var(--line);background:#202020;}
+.simple .section-title h1 {font-size:32px;}
+#previewCaption {color:#c4c4c4;font-size:12px;margin-top:10px;}
+.stage {overflow:hidden;background:#101010;}
+.deviceFrame {position:relative;width:min(100%,45vh,460px);isolation:isolate;}
+.deviceFrame .board {width:100%;max-width:none;}
+.board .cap {isolation:isolate;overflow:hidden;background:#292929;color:#f2f2f2;border-color:#565656;box-shadow:none;}
+.board .cap[aria-pressed=true] {border-color:#242424;outline:2px solid #fff;outline-offset:1px;}
+.board:not(.simulation) .cap[aria-pressed=true]:not([data-session]) {background:#eeeeee;color:#161616;}
+.board .cap:disabled,.board .smallKey:disabled {opacity:1;}
+.board .cap img,.board .dial img {filter:brightness(0) invert(.9); }
+.board .cap[aria-pressed=true]:not([data-session]) img {filter:brightness(0);}
+.board.simulation .cap[aria-pressed=true] img,.board .cap[data-session] img {filter:brightness(0) invert(.9);}
+.board .cap:is([data-control=K01],[data-control=K02],[data-control=K03],[data-control=K04],[data-control=K05],[data-control=K06],[data-control=K13]) {
+  background:rgba(235,235,235,.13);border-color:rgba(255,255,255,.42);color:#fff;
+}
+.board .cap[data-session][aria-pressed=true] {outline-color:white;}
+.board:not(.simulation) .cap[aria-pressed=true]:not([data-session]) {color:#141414;}
+.board .dial .smallKey:not([data-control=ENC_PRESS]) {background:#252525;border:1px solid #777;}
+.board.simulation .keyNum::after {display:none;}
+.board .cap :is(.keyNum,.capLabel,img) {position:relative;z-index:1;}
+.lamp {pointer-events:none;position:absolute;inset:0;background:var(--lamp-color);border-radius:inherit;}
+.lamp:not([data-effect]),.lamp[data-effect="0"] {display:none;}
+.cap .lamp {inset:0;opacity:.8;mask-image:linear-gradient(160deg,#0003,#0007 62%,#000c); }
+#underglow {inset:-.8%;border-radius:9%;mask-image:linear-gradient(#000 0 0),linear-gradient(#000 0 0);mask-origin:content-box,border-box;mask-clip:content-box,border-box;mask-composite:exclude;padding:4.9%;}
+/* Two identical bands fill the layer. Moving one band width completes a loop. */
+.lamp[data-effect="2"],.lamp[data-effect="3"] {
+  background-size:50% 100%;
+  background-repeat:repeat-x;
+  animation:band-loop 1.8s linear infinite;
+}
+.lamp[data-effect="2"] {background-image:linear-gradient(90deg,transparent,var(--lamp-color),transparent);background-color:transparent;}
+.lamp[data-effect="3"] {
+  background-image:linear-gradient(90deg,#ff7979,#f5c568,#76ddb0,#79abff,#bf85fd,#ff7979);
+  animation-duration:3.2s;
+}
+@keyframes band-loop {to{background-position:100% 0;}}
+@property --rim-angle {syntax:"<angle>";inherits:false;initial-value:0deg;}
+#underglow:is([data-effect="2"],[data-effect="3"]) {
+  background-size:100% 100%;
+  animation-name:rim-loop;
+}
+#underglow[data-effect="2"] {background-image:conic-gradient(from var(--rim-angle),transparent,var(--lamp-color) 28%,transparent 62%);}
+#underglow[data-effect="3"] {background-image:conic-gradient(from var(--rim-angle),#ff7979,#f5c568,#76ddb0,#79abff,#bf85fd,#ff7979);}
+@keyframes rim-loop {to{--rim-angle:1turn;}}
+.lamp[data-effect="4"] {animation:breathe 1.9s ease-in-out infinite alternate;}
+.lamp[data-effect="5"] {background:linear-gradient(125deg,var(--lamp-color),transparent,var(--lamp-color));background-size:200% 100%;animation:flow 3s ease-in-out infinite alternate;}
+.lamp[data-effect="6"] {animation:soft-breathe 3.2s ease-in-out infinite alternate;}
+@keyframes flow {from{background-position:100% 50%;}to{background-position:0% 50%;}}
+@keyframes breathe {from{opacity:.1;}to{opacity:.9;}}
+@keyframes soft-breathe {from{opacity:.36;}to{opacity:.68;}}
+@media(prefers-reduced-motion:reduce){.lamp{animation:none!important;}}

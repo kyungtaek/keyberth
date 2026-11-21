@@ -9,7 +9,7 @@ const { installPermissionGuide } = require('./permissions/guide.cjs');
 const page = path.join(__dirname, 'index.html');
 const helper = app.isPackaged ? path.join(process.resourcesPath, 'KeyberthBridge')
   : path.join(__dirname, '../.build/debug/MicroCompanion');
-let bridge, tray, editor, popup, quitting = false, serial = 0;
+let bridge, tray, editor, quitting = false, serial = 0;
 const pending = new Map();
 let hud, hudTimer, hudMessage, hudReady = false;
 function showHud(message) {
@@ -36,12 +36,13 @@ function showHud(message) {
   }
   if (!hudReady) return;
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-  const [width, height] = hud.getSize();
+  const height=message.keys?.length ? 108 : 84, width=300;
+  hud.setSize(width,height);
   hud.setPosition(Math.round(area.x+(area.width-width)/2), Math.round(area.y+Math.max(0,area.height-height-32)));
   hud.webContents.send('hud', message);
   hud.showInactive();
   clearTimeout(hudTimer);
-  hudTimer = setTimeout(() => hud.hide(), 1500);
+  hudTimer = setTimeout(() => hud.hide(), message.keys?.length ? 2300 : 1500);
 }
 function startBridge() {
   const child = spawn(helper, process.argv.includes('--agent-diagnostics') ? ['--agent-diagnostics'] : [],
@@ -81,48 +82,38 @@ function request(method, data = {}) {
   });
 }
 
-function makeWindow(isPopup) {
+function makeWindow() {
+  const {width,height}=screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workAreaSize;
   const win = new BrowserWindow({
-    width: isPopup ? 420 : 1080, height: isPopup ? 508 : 700,
-    minWidth: isPopup ? 420 : 840, minHeight: isPopup ? 508 : 580,
-    show: false, title: 'Keyberth', backgroundColor: '#141619',
-    frame: !isPopup, titleBarStyle: isPopup ? undefined : 'hiddenInset',
-    resizable: !isPopup, fullscreenable: !isPopup, skipTaskbar: isPopup,
+    width:Math.min(width,1400), height:Math.min(height,900),
+    minWidth:Math.min(width,840), minHeight:Math.min(height,600),
+    show:false, title:'Keyberth', backgroundColor:'#141619', titleBarStyle:'hiddenInset',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
   });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
-  win.loadFile(page, { query: { view: isPopup ? 'sessions' : 'mapping', popup: String(isPopup) } });
-  if (isPopup) win.on('blur', () => win.hide());
+  win.loadFile(page);
   win.on('close', event => { if (!quitting) { event.preventDefault(); win.hide(); } });
   return win;
 }
 function openEditor(view = 'mapping') {
-  popup?.hide();
-  if (!editor) editor = makeWindow(false);
+  if (!editor) editor = makeWindow();
   const win = editor;
   const show = () => { win.webContents.send('view', view); win.show(); win.focus(); };
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', show);
   else show();
 }
-function showPopup() {
-  if (!popup) popup = makeWindow(true);
-  if (popup.isVisible()) return popup.hide();
-  const a = tray.getBounds(), area = screen.getDisplayMatching(a).workArea;
-  const x = Math.round(a.x + (a.width - popup.getBounds().width) / 2);
-  popup.setPosition(Math.max(area.x, Math.min(x, area.x + area.width - 420)), Math.max(area.y, a.y + a.height + 4));
-  popup.show(); popup.focus();
-}
 ipcMain.handle('command', async (event, method, data) => {
   if (fileURLToPath(event.senderFrame.url) !== page) throw new Error('Unknown window');
-  if (['addProfile','removeProfile'].includes(method)) {
+  if (['addProfile','removeProfile','addFavorite','removeFavorite'].includes(method)) {
     if (!editor || event.sender!==editor.webContents) throw Error('편집 창에서 키맵을 관리하세요.');
+    if (method==='removeFavorite') return request(method,{profile:data.profile});
     if (method==='removeProfile') {
       const choice=await dialog.showMessageBox(editor,{message:'선택한 앱의 키맵을 삭제할까요?',detail:'저장된 키 배정도 삭제됩니다.',buttons:['취소','삭제'],cancelId:0,defaultId:0});
       return choice.response===1 ? request(method,{profile:data.profile}) : null;
     }
     if (data?.profile) return request(method,{profile:data.profile});
-    const pick=await dialog.showOpenDialog(editor,{title:'키맵을 추가할 앱 선택',defaultPath:'/Applications',properties:['openFile'],filters:[{name:'macOS 앱',extensions:['app']}]});
+    const pick=await dialog.showOpenDialog(editor,{title:method==='addFavorite'?'즐겨찾는 앱 선택':'키맵을 추가할 앱 선택',defaultPath:'/Applications',properties:['openFile'],filters:[{name:'macOS 앱',extensions:['app']}]});
     return pick.canceled ? null : request(method,{target:pick.filePaths[0]});
   }
   if ((method==='installClaudeHooks'||method==='removeClaudeHooks') && editor && event.sender===editor.webContents) {
@@ -148,9 +139,8 @@ ipcMain.handle('command', async (event, method, data) => {
     throw new Error('Obsidian 보관함 안의 Markdown 문서를 선택하세요.');
   }
   if (method === 'editor' && ['mapping','device','sessions'].includes(data?.view)) return openEditor(data.view);
-  if (!['state','catalog','save','select','connect','readPrefs','savePrefs','readLighting','saveLighting','activateProfile','toggleAuto','configureClaude'].includes(method)) throw new Error('Unknown command');
+  if (!['state','catalog','appMenus','runningApps','save','select','connect','readPrefs','savePrefs','readLighting','saveLighting','activateProfile','toggleAuto','configureClaude'].includes(method)) throw new Error('Unknown command');
   const result = await request(method, data);
-  if (method === 'select' && event.sender === popup?.webContents) popup.hide();
   return result;
 });
 if (process.argv.includes('--check-device')) {
@@ -159,11 +149,10 @@ if (process.argv.includes('--check-device')) {
 else {
   app.on('second-instance', () => openEditor());
   app.whenReady().then(() => {
-    app.dock?.hide();
     startBridge();
     const icon = nativeImage.createFromPath(path.join(__dirname, 'tray.png')).resize({width:18,height:18});
     icon.setTemplateImage(true);
-    tray = new Tray(icon); tray.setToolTip('Keyberth'); tray.on('click', showPopup);
+    tray = new Tray(icon); tray.setToolTip('Keyberth'); tray.on('click', () => openEditor());
     const permissionGuide = installPermissionGuide(request, () => editor);
     const checkUpdates = require('./updates.cjs').configureUpdates(() => { quitting = true; });
     const items = [{ label:'키 매핑', click:()=>openEditor() }, { label:'기기 설정…', accelerator:'Cmd+,', click:()=>openEditor('device') },
@@ -175,7 +164,7 @@ else {
         const state = await request('state');
         const change = (method, data) => request(method, data).catch(error => dialog.showErrorBox('키맵 변경 실패', error.message));
         controls = [{label:'포커스된 앱으로 자동 전환', type:'checkbox', checked:state.automatic, click:()=>change('toggleAuto')},
-          ...state.profiles.map(profile => ({label:profile.name, type:'radio', checked:profile.id === state.profile,
+          ...[{id:"unconfigured",name:"글로벌"},...state.profiles].map(profile => ({label:profile.name, type:'radio', checked:profile.id === state.profile,
             click:()=>change('activateProfile', {profile:profile.id})}))];
       } catch {
         controls = [{label:'키맵 연결 대기 중', enabled:false}];
@@ -186,7 +175,9 @@ else {
     openEditor(process.argv.includes('--show-slots') ? 'sessions' : 'mapping');
     permissionGuide.checkAtStartup();
   });
-  app.on('activate', () => openEditor());
+  app.on('activate', () => {
+    if (!editor || !editor.isVisible()) openEditor();
+  });
   app.on('before-quit', () => { quitting = true; bridge?.stdin.end(); });
   app.on('window-all-closed', () => {});
 }

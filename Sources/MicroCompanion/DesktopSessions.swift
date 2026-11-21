@@ -6,6 +6,7 @@ struct DesktopSession {
     let title: String
     var light: SessionLight
     var completionRevision: String? = nil
+    var updated:Double = 0
 }
 
 enum DesktopSessions {
@@ -34,11 +35,11 @@ enum DesktopSessions {
         let scope = pendingT3Only ? "AND NOT "+settled+" AND "+pending : ""
         let limit = pendingT3Only ? "" : "LIMIT 6"
         let sql = codex ? """
-            SELECT id, substr(coalesce(nullif(name,''), title),1,160) AS title, rollout_path
+            SELECT id, substr(coalesce(nullif(name,''), title),1,160) AS title, rollout_path, coalesce(recency_at_ms,updated_at_ms,updated_at*1000)/1000.0 AS updated
             FROM threads WHERE archived=0 AND originator IN ('Codex Desktop','codex_work_desktop')
             ORDER BY coalesce(recency_at_ms,updated_at_ms,updated_at*1000) DESC,id LIMIT 6
             """ : """
-            SELECT thread_id AS id,substr(title,1,160) AS title,
+            SELECT thread_id AS id,substr(title,1,160) AS title, (julianday(updated_at)-2440587.5)*86400 AS updated,
             (SELECT CAST(r.ordinal AS TEXT) FROM orchestration_v2_projection_runs r WHERE r.thread_id=t.thread_id ORDER BY r.ordinal DESC LIMIT 1) AS revision,
             CASE WHEN \(settled) THEN 'settled'
             WHEN \(pending)
@@ -57,7 +58,7 @@ enum DesktopSessions {
             data = try query(db.absoluteString+"?immutable=1")
         }
         guard !data.isEmpty else { return [] }
-        struct Row: Decodable { let id: String; let title, rollout_path, status, revision: String? }
+        struct Row: Decodable { let updated:Double?; let id: String; let title, rollout_path, status, revision: String? }
         let rows = try JSONDecoder().decode([Row].self, from:data)
         let turns = codex ? latestCodexTurns(rows.compactMap { UUID(uuidString:$0.id) }, home:home) : [:]
         var environment = "", version = ""
@@ -73,7 +74,7 @@ enum DesktopSessions {
             guard let url else { return nil }
             let states: [String:SessionLight] = ["attention":.attention,"running":.running,"completed":.done,"settled":.empty,"stopped":.empty,"interrupted":.ready,"cancelled":.empty]
             let (light,revision) = codex ? (turns[row.id.lowercased()] ?? rolloutState(row.rollout_path)) : (states[row.status ?? ""] ?? .unknown,row.revision)
-            return DesktopSession(url:url,title:row.title ?? row.id,light:light,completionRevision:revision)
+            return DesktopSession(url:url,title:row.title ?? row.id,light:light,completionRevision:revision,updated:row.updated ?? 0)
         }
     }
 

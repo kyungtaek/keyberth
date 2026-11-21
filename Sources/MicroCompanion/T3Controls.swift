@@ -3,6 +3,8 @@ import CoreAudio
 import MicroCore
 
 @MainActor enum T3Controls {
+    static func visibleRoute() -> URL? { try? Context().route }
+
     private struct Context {
         let app: NSRunningApplication
         let root: AppNode
@@ -126,6 +128,12 @@ import MicroCore
     }
 
     static func perform(_ action:String, stillActive:()->Bool) async throws {
+        if let command = AppProfile.t3Commands.first(where:{ action == "agent.t3."+$0.id }) {
+            let ctx = try Context()
+            try ctx.focusComposer()
+            try DesktopShortcut.send(chord(command.id,default:command.chord),to:.t3)
+            return
+        }
         switch action {
         case "agent.terminal","agent.rightPanel":
             let terminal=action == "agent.terminal"
@@ -185,9 +193,9 @@ import MicroCore
             try ctx.focusComposer()
             guard stillActive(), ctx.route == route else { throw CompanionError("T3 세션이 변경됐습니다.") }
             try DesktopShortcut.send(chord("thread.settle",default:"cmd+shift+s"),to:.t3)
-        case "agent.stop":
-            let buttons = try Context().buttons(["Stop generation"])
-            guard buttons.count == 1 else { throw CompanionError("현재 대화에서 중단할 응답을 확인할 수 없습니다.") }
+        case "agent.stop","agent.resume":
+            let buttons = try Context().buttons([action == "agent.stop" ? "Stop generation" : "Resume thread"])
+            guard buttons.count == 1 else { throw CompanionError("현재 대화에서 해당 동작을 사용할 수 없습니다.") }
             try buttons[0].press()
         case "agent.submit":
             let buttons=try Context().buttons(["Submit message","Queue message","Steer message","Compact and send","Update queued message"])

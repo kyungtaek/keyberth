@@ -1,14 +1,28 @@
 :root { color-scheme:dark; font:14px -apple-system,sans-serif; background:transparent; }
 body {
   box-sizing:border-box; margin:0; height:100vh; display:grid; place-items:center;
-  text-align:center; border-radius:20px; overflow:hidden; color:white;
-  border:1px solid #edfbff54;
-  background:linear-gradient(115deg,#78ede01f,transparent 40%,#e5a3eb19),
-             linear-gradient(#18202a42,#10172358);
+  text-align:center; border-radius:20px; overflow:hidden; color:#f7f7f7;
+  border:1px solid #f8f8f854;
+  background:linear-gradient(108deg,rgba(38,38,38,.72),rgba(24,24,24,.88) 41%,rgba(31,31,31,.88));
   box-shadow:inset 0 1px 0 #ffffff26;
 }
 [role=status] {box-sizing:border-box; width:100%; padding:0 14px;}
-small,strong {display:block;text-shadow:0 1px 4px #09111eb3;}
+small,strong {display:block;}
 small {font-size:12px; line-height:15px; font-weight:550;}
 strong {margin-top:2px;font-size:23px;line-height:28px;letter-spacing:-.035em;}
-@media(prefers-reduced-transparency:reduce){body{background:#222932;}}
+@media(prefers-reduced-transparency:reduce){body{background:#282828;}}
+
+.guide [role=status]{display:flex;align-items:center;gap:14px;text-align:left;}
+.caption{min-width:0;flex:1;}
+.guide strong{font-size:16px;line-height:21px;font-weight:650;letter-spacing:normal;margin:0 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#pad:not([hidden]){display:grid;grid-template:repeat(4,17px)/repeat(4,17px);gap:2px;padding:5px;background:#2f2f2fd9;border:1px solid #ababab75;border-radius:10px;}
+#pad b{display:grid;place-items:center;border-radius:3px;background:#5e5e5e;color:#e1e1e1;font:600 9px/1 -apple-system,sans-serif;}
+#pad b.changed,kbd{background:#d3d3d3;color:#2e2e2e;}
+#pad .touch{background:#1c1c1c;border-radius:50%;margin:4px;}
+#pad .dial,#pad .stick{display:grid;align-content:center;grid-template-columns:repeat(3,1fr);border-radius:50%;background:#454545;overflow:hidden;}
+#pad .stick{grid-template:repeat(3,1fr)/repeat(3,1fr);}
+#pad .stick b:nth-child(1){grid-area:1/2}#pad .stick b:nth-child(2){grid-area:2/1}#pad .stick b:nth-child(3){grid-area:2/3}#pad .stick b:nth-child(4){grid-area:3/2}
+#pad div b{font-size:6px;}
+#legend div{display:flex;align-items:center;gap:7px;margin:2px 0;font:550 13px/17px -apple-system,sans-serif;}
+#legend span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+kbd{min-width:21px;border-radius:4px;text-align:center;font:650 12px/16px -apple-system,sans-serif;}

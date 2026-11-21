@@ -59,11 +59,17 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
     public var hasRecentSessions: Bool { [.t3, .claudeCode, .claude, .codex].contains(self) }
 
     public var agentActions: [String:String] {
+        if self == .cmux {
+            return ["agent.stop":"터미널 작업 중단 (SIGINT)", "agent.wake":"최대 절전 에이전트 깨우기",
+                    "agent.hibernate":"에이전트 최대 절전", "agent.splitRight":"오른쪽 터미널 분할", "agent.splitDown":"아래 터미널 분할"]
+        }
         guard hasRecentSessions else { return [:] }
         var entries = Dictionary(uniqueKeysWithValues: (1...6).map { ("recent.\($0)", "최근 세션 \($0)") })
         if self == .claudeCode {
             entries.merge(["agent.approve":"이번 요청 승인", "agent.decline":"요청 거절"]) { _, new in new }
         } else if self == .t3 {
+            for command in Self.t3Commands { entries["agent.t3."+command.id] = command.label }
+            entries["agent.resume"] = "현재 대화 재개"
             entries["agent.decline"] = "요청 거부"
             entries["agent.nextPending"] = "다음 입력 대기 세션"
             for entry in Self.t3Controls { entries[entry.action] = entry.label }
@@ -73,9 +79,31 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
                            "agent.mic":"누르고 받아쓰기", "agent.newChat":"새 대화", "agent.submit":"보내기", "agent.plan":self == .claude ? "계획 모드 선택" : "계획 모드 전환",
                            "agent.back":"이전 페이지", "agent.forward":"다음 페이지", "agent.sidebar":"사이드바 전환"]) { _, new in new }
         }
-        if self == .codex { entries["agent.dots"] = "내 Dots 열기" }
+        if self == .codex {
+            entries["agent.dots"] = "내 Dots 열기"
+            entries["agent.stop"] = "현재 응답 중단"
+            entries["agent.resume"] = "현재 대화 재개"
+        }
         return entries
     }
+
+    public static let t3Commands: [(id:String,label:String,chord:String)] = [
+        ("commandPalette.toggle","명령 팔레트","cmd+k"), ("filePicker.toggle","파일 열기","cmd+p"),
+        ("projectSearch.toggle","프로젝트 내용 검색","cmd+shift+f"), ("chat.find","대화에서 찾기","cmd+f"),
+        ("chat.newLocal","새 로컬 대화","cmd+shift+n"), ("chat.newWithoutProject","프로젝트 없이 새 대화","cmd+alt+n"),
+        ("thread.previous","이전 대화","cmd+shift+["), ("thread.next","다음 대화","cmd+shift+]"),
+        ("thread.copyReference","대화 참조 복사","cmd+shift+c"), ("thread.pin","대화 고정 전환","cmd+shift+p"),
+        ("threadPanel.toggle","대화 패널 전환","cmd+shift+b"), ("view.reopenClosed","닫은 보기 다시 열기","cmd+shift+t"),
+        ("sidebar.toggle","사이드바 전환","cmd+b"), ("navigation.back","뒤로 이동","cmd+["),
+        ("navigation.forward","앞으로 이동","cmd+]"), ("usage.open","사용량 열기","cmd+u"),
+        ("theme.select","테마 선택","cmd+alt+a"), ("appearance.cycle","화면 모드 순환","cmd+alt+shift+a"),
+        ("themeEditor.toggle","테마 편집기","cmd+alt+shift+t"), ("composer.stash","작성 중인 입력 보관","cmd+s"),
+        ("modelPicker.toggle","모델 선택","cmd+shift+m"), ("composer.host","호스트 선택","cmd+shift+h"),
+        ("composer.effort","추론 수준 선택","cmd+shift+e"), ("composer.mode","대화 모드 선택","cmd+shift+a"),
+        ("composer.workspace","작업공간 선택","cmd+shift+x"), ("composer.branch","브랜치 선택","cmd+shift+g"),
+        ("composer.previousWorktree","이전 워크트리","cmd+shift+l"), ("preview.toggle","미리보기 전환","cmd+shift+j"),
+        ("workspace.focusNext","다음 영역 포커스","f6"), ("workspace.focusPrevious","이전 영역 포커스","shift+f6")
+    ]
 
     private static let t3Controls: [(input:String, action:String, label:String)] = [
         ("JOY_DOWN","agent.terminal","터미널 열기/닫기"), ("JOY_RIGHT","agent.rightPanel","오른쪽 사이드 패널 열기/닫기"),

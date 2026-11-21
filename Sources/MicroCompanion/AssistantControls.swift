@@ -99,6 +99,8 @@ enum AssistantControls {
         case "agent.newChat":
             let chord = codex ? try codexChord("newTask",fallback:"cmd+n") : "cmd+n"
             try DesktopShortcut.send(chord,to:profile)
+        case "agent.stop","agent.resume":
+            try CodexControls.performTurnAction(action)
         case "agent.submit":
             if codex { try CodexControls.submit() }
             else { try DesktopShortcut.send("enter",to:profile) }

@@ -41,6 +41,21 @@ enum CodexControls {
         return true
     }
 
+    @MainActor static func performTurnAction(_ action:String) throws {
+        let labels: [String]
+        switch action {
+        case "agent.stop": labels = ["stop","중지"]
+        default: labels = ["resume","다시 시작"]
+        }
+        let win = try window()
+        let matches = win.descendants { node in
+            node.role == "AXButton" && labels.contains(ClaudeControls.label(node).lowercased()) &&
+            node.attr("AXEnabled") as? Bool != false &&
+            node.ancestors.contains { $0.identifier.contains("composerlayoutbody-") }
+        }
+        guard matches.count == 1, click(matches[0]) else { throw CompanionError("현재 작성창에서 해당 동작을 사용할 수 없습니다.") }
+    }
+
     struct Dictation {
         let window: AppNode
         let stopChord: String
