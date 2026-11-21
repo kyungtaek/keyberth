@@ -45,7 +45,10 @@ enum MacActions {
             return
         }
         // macOS consumer media keys use a system-defined down/up event pair.
-        let mediaKeys = ["system.playPause":16, "system.nextTrack":17, "system.previousTrack":18]
+        let mediaKeys = [
+            "system.volumeUp":0, "system.volumeDown":1, "system.mute":7,
+            "system.playPause":16, "system.nextTrack":17, "system.previousTrack":18
+        ]
         if let key = mediaKeys[action] {
             guard CGPreflightPostEventAccess() else { throw CompanionError("손쉬운 사용 권한이 필요합니다.") }
             for phase in [0xA,0xB] {
@@ -56,10 +59,6 @@ enum MacActions {
             }
             return
         }
-        let scripts = ["system.volumeUp":"set volume output volume ((output volume of (get volume settings)) + 6)",
-                       "system.volumeDown":"set volume output volume ((output volume of (get volume settings)) - 6)",
-                       "system.mute":"set volume output muted (not (output muted of (get volume settings)))"]
-        if let script = scripts[action] { _ = try CmuxClient.run(["-e",script],executable:"/usr/bin/osascript"); return }
         guard let app = NSWorkspace.shared.frontmostApplication,
               let window = AppNode(element:AXUIElementCreateApplication(app.processIdentifier)).node("AXFocusedWindow") else { throw CompanionError("이동할 창을 확인하세요.") }
         let failure = CompanionError("이 창에서 해당 동작을 사용할 수 없습니다.")

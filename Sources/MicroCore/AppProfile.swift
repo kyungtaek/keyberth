@@ -80,6 +80,10 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
                            "agent.back":"이전 페이지", "agent.forward":"다음 페이지", "agent.sidebar":"사이드바 전환"]) { _, new in new }
         }
         if self == .codex {
+            entries["agent.modelNext"] = "다음 모델"
+            entries["agent.modelPrevious"] = "이전 모델"
+            entries["agent.effortUp"] = "추론 노력 높이기"
+            entries["agent.effortDown"] = "추론 노력 낮추기"
             entries["agent.dots"] = "내 Dots 열기"
             entries["agent.stop"] = "현재 응답 중단"
             entries["agent.resume"] = "현재 대화 재개"

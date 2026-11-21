@@ -24,7 +24,7 @@ enum CodexControls {
 
     // Chromium can acknowledge AXPress without dispatching a pointer event.
     // Only click a verified, visible control under the pointer coordinates.
-    private static func click(_ button:AppNode) -> Bool {
+    private static func click(_ button:AppNode, allowContainer:Bool = false) -> Bool {
         guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == AppProfile.codex.bundleIDs.first,
               let p = button.attr("AXPosition"), let s = button.attr("AXSize"),
               CFGetTypeID(p) == AXValueGetTypeID(), CFGetTypeID(s) == AXValueGetTypeID() else { return false }
@@ -33,7 +33,8 @@ enum CodexControls {
         let point = CGPoint(x:position.x + size.width/2,y:position.y + size.height/2)
         var hit:AXUIElement?
         guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(),Float(point.x),Float(point.y),&hit) == .success,
-              let hit, AppNode(element:hit).ancestors.contains(where:{ CFEqual($0.element,button.element) }),
+              let hit, AppNode(element:hit).ancestors.contains(where:{ CFEqual($0.element,button.element) }) ||
+                  (allowContainer && AppNode(element:hit).role == "AXGroup" && button.node("AXWindow").map { window in AppNode(element:hit).ancestors.contains { CFEqual($0.element,window.element) } } == true),
               let down = CGEvent(mouseEventSource:nil,mouseType:.leftMouseDown,mouseCursorPosition:point,mouseButton:.left),
               let up = CGEvent(mouseEventSource:nil,mouseType:.leftMouseUp,mouseCursorPosition:point,mouseButton:.left) else { return false }
         down.post(tap:.cghidEventTap)
@@ -54,6 +55,82 @@ enum CodexControls {
             node.ancestors.contains { $0.identifier.contains("composerlayoutbody-") }
         }
         guard matches.count == 1, click(matches[0]) else { throw CompanionError("현재 작성창에서 해당 동작을 사용할 수 없습니다.") }
+    }
+
+    enum PickerStep: String {
+        case next = "agent.modelNext", previous = "agent.modelPrevious"
+        case up = "agent.effortUp", down = "agent.effortDown"
+    }
+
+    @MainActor static func adjust(_ step:PickerStep) async throws {
+        let win = try window()
+        let error = CompanionError("Codex 작성창의 모델·추론 노력 메뉴를 확인하세요.")
+        func sameWindow() -> Bool {
+            NSWorkspace.shared.frontmostApplication?.bundleIdentifier == AppProfile.codex.bundleIDs.first &&
+            (try? window()).map { CFEqual($0.element,win.element) } == true
+        }
+        func modelName(_ name:String) -> Bool {
+            name.range(of:#"^(GPT-|o[1-9](?:-| |$))"#,options:[.regularExpression,.caseInsensitive]) != nil
+        }
+        func items(_ matches:(AppNode)->Bool) async throws -> [AppNode] {
+            let deadline = ProcessInfo.processInfo.systemUptime + 1.5
+            repeat {
+                guard sameWindow() else { throw error }
+                let found = win.descendants { $0.role == "AXMenuItem" && $0.attr("AXEnabled") as? Bool != false && matches($0) }
+                if !found.isEmpty { return found }
+                try await Task.sleep(nanoseconds:35_000_000)
+            } while ProcessInfo.processInfo.systemUptime < deadline
+            throw error
+        }
+        let buttons = win.descendants { $0.role == "AXPopUpButton" && modelName(ClaudeControls.label($0)) &&
+            $0.identifier.contains("h-token-button-composer") }
+        guard buttons.count == 1, sameWindow() else { throw error }
+        let current = ClaudeControls.label(buttons[0])
+        func activate(_ node:AppNode) async throws {
+            if node.role == "AXMenuItem" {
+                try await Task.sleep(nanoseconds:240_000_000)
+                guard sameWindow() else { throw error }
+                if modelName(ClaudeControls.label(node)) {
+                    guard AXUIElementSetAttributeValue(node.element,"AXFocused" as CFString,kCFBooleanTrue) == .success else { throw error }
+                    try await Task.sleep(nanoseconds:60_000_000)
+                    guard node.attr("AXFocused") as? Bool == true else { throw error }
+                    try DesktopShortcut.send("enter",to:.codex)
+                    return
+                }
+            }
+            for _ in 0..<6 {
+                guard sameWindow() else { throw error }
+                if click(node,allowContainer:true) { return }
+                try await Task.sleep(nanoseconds:40_000_000)
+            }
+            try node.press()
+        }
+        try await activate(buttons[0])
+        var dismiss = true
+        defer { if dismiss && sameWindow() { try? DesktopShortcut.send("escape",to:.codex) } }
+        switch step {
+        case .up, .down:
+            let sliders = try await items { $0.identifier.contains("sliderkeyboardcontrol-") }
+            guard sliders.count == 1, AXUIElementSetAttributeValue(sliders[0].element,"AXFocused" as CFString,kCFBooleanTrue) == .success,
+                  sliders[0].attr("AXFocused") as? Bool == true, sameWindow() else { throw error }
+            try DesktopShortcut.send(step == .up ? "right" : "left",to:.codex)
+            try await Task.sleep(nanoseconds:60_000_000)
+        case .next, .previous:
+            let toggles = try await items { $0.identifier.contains("viewtoggle-") }
+            guard toggles.count == 1 else { throw error }
+            try await activate(toggles[0])
+            let models = try await items { modelName(ClaudeControls.label($0)) }
+            let indices = models.indices.filter {
+                let name = ClaudeControls.label(models[$0])
+                return current == name || current.hasPrefix(name+" ")
+            }
+            guard let index = indices.max(by:{ ClaudeControls.label(models[$0]).count < ClaudeControls.label(models[$1]).count }) else { throw error }
+            let next = (index + (step == .next ? 1 : models.count-1)) % models.count
+            try await activate(models[next])
+            // Some builds return to the power menu after applying a model.
+            try await Task.sleep(nanoseconds:250_000_000)
+            dismiss = win.descendants({ $0.role == "AXMenuItem" && $0.identifier.contains("viewtoggle-") },first:true).count == 1
+        }
     }
 
     struct Dictation {

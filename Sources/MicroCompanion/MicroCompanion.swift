@@ -132,6 +132,7 @@ import MicroCore
     private var micProfile: AppProfile?
     private var t3Dictation: T3Controls.Dictation?
     private var codexDictation: CodexControls.Dictation?
+    private var codexPickerTask: Task<Void,Never>?
     private var codexForkPending = false
     private var micKeys = Set<String>()
     private func finishMic() {
@@ -457,6 +458,15 @@ import MicroCore
                         if micProfile == nil { t3Dictation = try T3Controls.startDictation(); micProfile = .t3 }
                         micKeys.insert(code)
                     } else if profile == .t3 { performT3(binding) }
+                    else if profile == .codex, let step = CodexControls.PickerStep(rawValue:binding) {
+                        let previous = codexPickerTask
+                        codexPickerTask = Task {
+                            await previous?.value
+                            guard profile == .codex else { return }
+                            do { try await CodexControls.adjust(step) }
+                            catch { feedback = error.localizedDescription; hud(feedback) }
+                        }
+                    }
                     else if profile == .codex, binding == "agent.fork" {
                         guard !codexForkPending else { return }
                         codexForkPending = true
