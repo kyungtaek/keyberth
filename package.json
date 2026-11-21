@@ -1,7 +1,7 @@
 {
   "name": "keyberth",
   "productName": "Keyberth",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "main": "electron/main.cjs",
   "scripts": {

@@ -32,6 +32,15 @@ enum KeyMap {
     static func localBinding(_ saved:String?) -> String? {
         saved == "inherit" ? nil : saved
     }
+    static func preset(_ profile: AppProfile) -> [String:String] {
+        guard [.codex,.t3,.cmux].contains(profile) else { return [:] }
+        var bindings = [String:String]()
+        for key in keys.dropFirst(6) + stick + knob {
+            let value = profile.defaultBinding(key)
+            if value != "none" { bindings[key] = value }
+        }
+        return bindings
+    }
     static func load() -> [String:String] {
         let defaults = preferences
         if let saved = defaults.dictionary(forKey: preference) as? [String:String] { return saved }

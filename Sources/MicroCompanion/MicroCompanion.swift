@@ -161,10 +161,18 @@ import MicroCore
     }
     private var selectedClaudeCode: URL? { didSet { if selectedClaudeCode != oldValue { selectedRequest = nil } } }
     private var completions = CompletionIndicator()
-    private func indicator(_ item:DesktopSession) -> DesktopSession {
+    private func indicator(_ item:DesktopSession, source:AppProfile, now:Double) -> DesktopSession {
         var result = item
+        result.updated = activity.observe(id:source.rawValue+"/"+item.url.absoluteString, light:item.light, revision:item.completionRevision, initialTime:item.updated, workTime:source == .codex || source == .t3 ? item.updated : nil, now:now)
         result.light = completions.display(item.light, id:item.url.absoluteString, revision:item.completionRevision)
         return result
+    }
+    private func rankedSessions(_ items:[DesktopSession],source:AppProfile) -> [DesktopSession] {
+        let now = Date().timeIntervalSince1970
+        let observed = items.map { indicator($0,source:source,now:now) }
+        return observed.sorted { a,b in
+            a.updated == b.updated ? a.url.absoluteString < b.url.absoluteString : a.updated > b.updated
+        }
     }
     private var selectedRequest: String?
     private var claudeCatalog = [ClaudeCodeSessions.Session]()
@@ -173,16 +181,16 @@ import MicroCore
     private var sourceSessions: [ClaudeCodeSessions.Session] { claudeCatalog.filter { claudeSource.isEmpty || $0.source == claudeSource } }
     private func rebuildClaudeSlots() {
         let items = sourceSessions
-        var remaining = items.filter { !claudePins.values.contains($0.item.url.absoluteString) }.makeIterator()
-        sessions = (1...6).map { slot in
-            if let pin=claudePins[String(slot)] { return items.first(where:{$0.item.url.absoluteString == pin})?.item }
-            return remaining.next()?.item
-        }
-        sessions = sessions.map { slot in slot.map { item in
-            var row=indicator(item)
-            row.updated=(items.first { $0.item.url==item.url }?.updated ?? 0)/1000
+        let ranked = rankedSessions(items.map { session in
+            var row = session.item
+            row.updated = session.updated / 1000
             return row
-        } }
+        },source:.claudeCode)
+        var remaining = ranked.filter { !claudePins.values.contains($0.url.absoluteString) }.makeIterator()
+        sessions = (1...6).map { slot in
+            if let pin=claudePins[String(slot)] { return ranked.first { $0.url.absoluteString == pin } }
+            return remaining.next()
+        }
         if !items.contains(where:{$0.item.url == selectedClaudeCode}) { selectedClaudeCode = nil }
         sessionStatus = profile.title + " · 슬롯 " + String(sessions.compactMap{$0}.count) + "/6"
         updateLights()
@@ -235,8 +243,7 @@ import MicroCore
                         completions.markViewed(visibleCodex.absoluteString)
                     }
                 }
-                if source == .claude { observeClaude(items) }
-                sessions = items.map(indicator)
+                sessions = rankedSessions(items,source:source)
                 sessionStatus = source.title + " · 슬롯 " + String(items.count) + "/6"
             } catch {
                 guard generation == sessionGeneration else { return }
@@ -274,19 +281,15 @@ import MicroCore
     }
     private var backgroundSessions = [AppProfile:[DesktopSession]]()
     private var collecting = false
-    private var seen = KeyMap.preferences.dictionary(forKey:"observedSessionTimes") as? [String:Double] ?? [:]
-    private var claudeHead:URL?
-    private func recordVisit(_ id:String) {
-        seen[id]=Date().timeIntervalSince1970
-        if seen.count>128, let oldest=seen.min(by:{ $0.value < $1.value }) { seen[oldest.key]=nil }
-        KeyMap.preferences.set(seen,forKey:"observedSessionTimes")
+    private var activity = SessionActivity(entries: (KeyMap.preferences.data(forKey:"sessionActivityV1").flatMap {
+        try? JSONDecoder().decode([String:SessionActivity.Entry].self,from:$0)
+    }) ?? [:])
+    private var persistedActivity: [String:SessionActivity.Entry]?
+    private func persistActivity() {
+        guard persistedActivity != activity.entries, let data=try? JSONEncoder().encode(activity.entries) else { return }
+        persistedActivity=activity.entries
+        KeyMap.preferences.set(data,forKey:"sessionActivityV1")
     }
-    private func observeClaude(_ items:[DesktopSession]) {
-        guard let head=items.first?.url else { return }
-        if let previous=claudeHead, previous != head { recordVisit("claude/"+head.absoluteString) }
-        claudeHead=head
-    }
-    private var observedCmux:UUID?
     private func refreshCombined() {
         guard !collecting else { return }
         collecting=true
@@ -296,7 +299,7 @@ import MicroCore
                 var result=[AppProfile:[DesktopSession]]()
                 for source in sources {
                     if source == .claudeCode {
-                        result[source]=ClaudeCodeSessions.read().prefix(6).map { session in
+                        result[source]=ClaudeCodeSessions.read().map { session in
                             var item=session.item; item.updated=session.updated/1000; return item
                         }
                     } else { result[source]=(try? DesktopSessions.read(source)) ?? [] }
@@ -304,8 +307,7 @@ import MicroCore
                 return result
             }.value
             for (source,items) in items where source != profile {
-                if source == .claude { observeClaude(items) }
-                backgroundSessions[source]=items.map(indicator)
+                backgroundSessions[source]=Array(rankedSessions(items,source:source).prefix(6))
             }
             collecting=false
             updateLights()
@@ -322,22 +324,18 @@ import MicroCore
         if enabled.contains(.cmux) {
             for (index,row) in rows.enumerated() {
                 guard let row else { continue }
-                let item=DesktopSession(url:URL(fileURLWithPath:row.id.uuidString),title:row.title,light:lights[index],updated:seen[row.id.uuidString] ?? 0)
+                let item=DesktopSession(url:URL(fileURLWithPath:row.id.uuidString),title:row.title,light:lights[index],updated:activity.entries["cmux/"+row.id.uuidString]?.time ?? 0)
                 result.append(CombinedSlot(source:.cmux,item:item,surface:row))
             }
         }
-        return Array(result.enumerated().sorted { a,b in
-            let left=max(a.element.item.updated,seen[a.element.id] ?? 0)
-            let right=max(b.element.item.updated,seen[b.element.id] ?? 0)
-            return left == right ? a.offset < b.offset : left > right
-        }.prefix(6).map(\.element))
+        return Array(result.sorted { a,b in
+            a.item.updated == b.item.updated ? a.id < b.id : a.item.updated > b.item.updated
+        }.prefix(6))
     }
     private func openCombined(_ slot:CombinedSlot) async throws {
         if let surface=slot.surface {
             try await Task.detached { try CmuxClient.focus(surface) }.value
-            remember(surface.id)
         } else { try await openSession(slot.item,source:slot.source) }
-        recordVisit(slot.id)
         updateLights()
     }
     private func combinedRow(_ slot:CombinedSlot) -> [String:Any] {
@@ -347,6 +345,7 @@ import MicroCore
                 "state":light.rawValue,"led":light.agentCode,"lightColor":(palette ?? .initial).rules[light.rawValue]?.slot.color ?? ""]
     }
     private func updateLights() {
+        persistActivity()
         let shared=combined
         var selected:Int?
         let states:[SessionLight]=KeyMap.keys.prefix(6).enumerated().map { position,key in
@@ -534,21 +533,12 @@ import MicroCore
                         if let target { try CmuxClient.focus(target) }
                         else { try await CmuxClient.perform(input, override: override) }
                     }.value
-                    if let target { remember(target.id) }
                     feedback = ""
                 } catch { feedback = error.localizedDescription }
             }
             selecting = false
             refresh()
         }
-    }
-    private var history = (KeyMap.preferences.stringArray(forKey: "recentSurfaces") ?? []).compactMap(UUID.init(uuidString:))
-    private func remember(_ id: UUID) {
-        guard history.first != id else { return }
-        history.removeAll { $0 == id }
-        history.insert(id, at: 0)
-        history = Array(history.prefix(6))
-        KeyMap.preferences.set(history.map(\.uuidString), forKey: "recentSurfaces")
     }
     var selecting = false
     var connecting = false
@@ -624,29 +614,28 @@ import MicroCore
             do {
                 let live = try await Task.detached { try CmuxClient.list() }.value
                 guard epoch == token, !selecting else { return }
-                if let active = live.first(where: \.active), NSWorkspace.shared.frontmostApplication?.bundleIdentifier == AppProfile.cmux.bundleIDs.first {
-                    if observedCmux != active.id { recordVisit(active.id.uuidString); observedCmux = active.id }
-                    remember(active.id)
-                } else { observedCmux = nil }
-                let recent = Deck.recent(live: live, history: history)
-                rows = (0..<6).map { $0 < recent.count ? recent[$0] : nil }
-                let current = rows
                 let syncBindings = profile == .cmux
                 let states = await Task.detached {
                     if syncBindings { CodexBinding.refresh(live) }
                     var signals: [UUID: WorkspaceSignal] = [:]
-                    for group in Dictionary(grouping: current.compactMap { $0 }, by: \.workspace).values {
+                    for group in Dictionary(grouping: live, by: \.workspace).values {
                         if let target = group.first { signals[target.workspace] = try? CmuxClient.signal(target) }
                     }
-                    return current.map { row -> SessionLight in
-                        guard let row else { return .empty }
+                    return live.map { row -> SessionLight in
                         return signals[row.workspace]?.light(active: row.active) ?? .unknown
                     }
                 }.value
                 guard epoch == token else { return }
                 let cmuxFront = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == AppProfile.cmux.bundleIDs.first
-                lights = zip(current,states).map { row,state in
-                    guard let row else { return .empty }
+                let observed=Date().timeIntervalSince1970
+                let observations: [(CmuxTarget,SessionLight,Double)] = zip(live,states).map { row,state in
+                    (row,state,activity.observe(id:"cmux/"+row.id.uuidString,light:state,now:observed))
+                }
+                let ranked = observations.sorted { a,b in a.2 == b.2 ? a.0.id.uuidString < b.0.id.uuidString : a.2 > b.2 }
+                rows = (0..<6).map { ranked.indices.contains($0) ? ranked[$0].0 : nil }
+                lights = (0..<6).map { index in
+                    guard ranked.indices.contains(index) else { return .empty }
+                    let (row,state,_) = ranked[index]
                     return completions.display(state,id:row.id.uuidString,viewed:cmuxFront && row.active)
                 }
                 cmuxStatus = "cmux 연결됨 · 슬롯 \(rows.compactMap { $0 }.count)/6"
@@ -799,7 +788,7 @@ import MicroCore
                 result["value"] = MacActions.favorites
             case "catalog":
                 result["value"] = ["profiles": profileList, "templates":AppProfile.allCases.map { ["id":$0.rawValue,"name":$0.title] }, "controls": KeyMap.controls.map { ["id": $0, "name": KeyMap.name($0), "action": KeyMap.label($0)] },
-                                   "appDefaults":Dictionary(uniqueKeysWithValues:AppProfile.allCases.map { p in (p.rawValue,Dictionary(uniqueKeysWithValues:KeyMap.controls.map { ($0,p.defaultBinding($0)) })) }), "agentActions": Dictionary(uniqueKeysWithValues: AppProfile.allCases.map { ($0.rawValue,$0.agentActions) }), "systemActions":MacActions.system, "favorites":MacActions.favorites, "slackActions": zip(SlackAction.inputs,SlackAction.labels).map { ["id":"slack."+$0.0,"name":$0.1] }, "modifiers": FunctionKey.modifiers, "special": FunctionKey.specialKeys] as [String: Any]
+                                   "presets":Dictionary(uniqueKeysWithValues:AppProfile.allCases.map { ($0.rawValue,KeyMap.preset($0)) }), "appDefaults":Dictionary(uniqueKeysWithValues:AppProfile.allCases.map { p in (p.rawValue,Dictionary(uniqueKeysWithValues:KeyMap.controls.map { ($0,p.defaultBinding($0)) })) }), "agentActions": Dictionary(uniqueKeysWithValues: AppProfile.allCases.map { ($0.rawValue,$0.agentActions) }), "systemActions":MacActions.system, "favorites":MacActions.favorites, "slackActions": zip(SlackAction.inputs,SlackAction.labels).map { ["id":"slack."+$0.0,"name":$0.1] }, "modifiers": FunctionKey.modifiers, "special": FunctionKey.specialKeys] as [String: Any]
             case "addProfile":
                 let next:AppProfile
                 if let path=r.target, path.hasSuffix(".app"), let id=Bundle(url:URL(fileURLWithPath:path))?.bundleIdentifier {
@@ -833,6 +822,15 @@ import MicroCore
             case "toggleAuto":
                 toggleAutomatic()
                 result["value"] = state()
+            case "applyPreset":
+                guard let id=r.profile, let p=AppProfile(rawValue:id), enabled.contains(p),
+                      !KeyMap.preset(p).isEmpty else { throw CompanionError("프리셋을 사용할 앱을 선택하세요.") }
+                var overrides = p == .cmux ? cmuxMappings : profiles[id] ?? [:]
+                overrides.merge(KeyMap.preset(p)) { existing,_ in existing }
+                if p == .cmux { cmuxMappings=overrides } else { profiles[id]=overrides }
+                KeyMap.preferences.set(exportMaps,forKey:"keymapOverridesV1")
+                if p == profile { updateLights() }
+                result["value"]=state()
             case "save" where r.scope == "global":
                 guard let key=r.input, KeyMap.controls.contains(key), let value=r.binding, KeymapArchive.common(value) else { throw CompanionError("글로벌 배정을 확인하세요.") }
                 global[key]=value

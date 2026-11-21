@@ -34,20 +34,31 @@ enum DesktopSessions {
         let settled = "(coalesce(json_extract(t.payload_json,'$.settledOverride'),'')='settled' OR json_extract(t.payload_json,'$.settledAt') IS NOT NULL)"
         let scope = pendingT3Only ? "AND NOT "+settled+" AND "+pending : ""
         let limit = pendingT3Only ? "" : "LIMIT 6"
+        let history = home.appendingPathComponent(".codex/thread_history_1.sqlite")
+        let created = "coalesce(created_at_ms/1000.0,created_at)"
+        let hasHistory = codex && FileManager.default.fileExists(atPath:history.path)
+        let attach = "ATTACH DATABASE '"+history.absoluteString.replacingOccurrences(of:"'",with:"''")+"?mode=ro' AS turns;"
+        let turnTime = "(SELECT coalesce(completed_at,started_at) FROM turns.thread_turns WHERE thread_id=threads.id ORDER BY rollout_ordinal DESC LIMIT 1)"
+        let activity = hasHistory ? "coalesce("+turnTime+","+created+")" : created
         let sql = codex ? """
-            SELECT id, substr(coalesce(nullif(name,''), title),1,160) AS title, rollout_path, coalesce(recency_at_ms,updated_at_ms,updated_at*1000)/1000.0 AS updated
+            SELECT id, substr(coalesce(nullif(name,''), title),1,160) AS title, rollout_path, \(activity) AS updated
             FROM threads WHERE archived=0 AND originator IN ('Codex Desktop','codex_work_desktop')
-            ORDER BY coalesce(recency_at_ms,updated_at_ms,updated_at*1000) DESC,id LIMIT 6
+            ORDER BY updated DESC,id LIMIT 6
             """ : """
-            SELECT thread_id AS id,substr(title,1,160) AS title, (julianday(updated_at)-2440587.5)*86400 AS updated,
+            SELECT thread_id AS id,substr(title,1,160) AS title, (julianday(max(t.created_at,
+            coalesce((SELECT coalesce(completed_at,requested_at) FROM orchestration_v2_projection_runs r WHERE r.thread_id=t.thread_id ORDER BY ordinal DESC LIMIT 1),''),
+            coalesce((SELECT max(coalesce(resolved_at,created_at)) FROM orchestration_v2_projection_runtime_requests q WHERE q.thread_id=t.thread_id),''),
+            coalesce(json_extract(t.payload_json,'$.settledAt'),'')))-2440587.5)*86400 AS updated,
             (SELECT CAST(r.ordinal AS TEXT) FROM orchestration_v2_projection_runs r WHERE r.thread_id=t.thread_id ORDER BY r.ordinal DESC LIMIT 1) AS revision,
             CASE WHEN \(settled) THEN 'settled'
             WHEN \(pending)
             THEN 'attention' ELSE (SELECT r.status FROM orchestration_v2_projection_runs r WHERE r.thread_id=t.thread_id ORDER BY r.ordinal DESC LIMIT 1) END AS status
-            FROM orchestration_v2_projection_threads t WHERE archived_at IS NULL AND deleted_at IS NULL \(scope) ORDER BY updated_at DESC,thread_id \(limit)
+            FROM orchestration_v2_projection_threads t WHERE archived_at IS NULL AND deleted_at IS NULL \(scope) ORDER BY updated DESC,thread_id \(limit)
             """
         func query(_ location: String) throws -> Data {
-            try CmuxClient.run(["-readonly","-json",location,sql], executable:"/usr/bin/sqlite3")
+            if hasHistory, let data = try? CmuxClient.run(["-readonly","-json",location,attach+sql],executable:"/usr/bin/sqlite3") { return data }
+            let fallback = hasHistory ? sql.replacingOccurrences(of:activity,with:created) : sql
+            return try CmuxClient.run(["-readonly","-json",location,fallback], executable:"/usr/bin/sqlite3")
         }
         let data: Data
         do { data = try query(db.path) }

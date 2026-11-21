@@ -49,7 +49,7 @@ function syncPicker(select,container) {
   }
 }
 function globalEdit() { return $('scope').value==='global'; }
-let editProfile='';
+let editProfile='', applyingPreset=false;
 function overrides(){return state?.appOverrides?.[editProfile] || {};}
 function hasOverride(id){return Object.hasOwn(overrides(),id) && overrides()[id]!=='inherit';}
 function draftKey() { return (globalEdit()?'global':editProfile) + '/' + selected; }
@@ -261,6 +261,11 @@ function renderMapping() {
   const desktop = globalEdit() || editProfile !== 'cmux';
   $('appEditor').hidden=globalEdit();
   $('overrideCount').textContent=editProfile ? '예외 키 '+Object.keys(overrides()).filter(hasOverride).length+'개' : '';
+  const presetKeys=Object.keys(catalog.presets?.[editProfile] || {});
+  const available=presetKeys.filter(key=>!Object.hasOwn(overrides(),key)).length;
+  $('applyPreset').hidden=globalEdit() || !presetKeys.length;
+  $('applyPreset').disabled=applyingPreset || !available;
+  $('applyPreset').textContent=available?'프리셋 적용 · '+available+'개':'프리셋 적용할 키 없음';
   $('inherit').hidden=globalEdit();
   $('inherit').disabled=!hasOverride(selected);
   $('current').previousElementSibling.textContent=globalEdit()?'글로벌 배정':hasOverride(selected)?'앱 배정':'글로벌에서 상속';
@@ -531,6 +536,15 @@ $('reloadMenus').onclick=()=>readMenus(editProfile);
 $('category').onchange=e=>{$('functionSearch').value='';categoryOverride=e.target.value;renderMapping();};
 $('base').onchange=e=>{draft().base=e.target.value;renderMapping();};
 $('scope').onchange=async()=>{updateEditor();if(!globalEdit()){try{runningApps=await api('runningApps');fillProcesses();}catch(error){fail(error);}}};
+$('applyPreset').onclick=async()=>{
+  const profile=editProfile;
+  applyingPreset=true;renderMapping();
+  try {
+    renderState(await api('applyPreset',{profile}));
+    announce('앱별 예외에 프리셋을 적용했습니다.');
+  } catch(error){fail(error);}
+  finally { applyingPreset=false;renderMapping(); }
+};
 $('inherit').onclick=async()=>{
   const key=draftKey();
   try {const next=await api('save',{profile:editProfile,input:selected,binding:'inherit'});drafts.delete(key);renderState(next);renderMapping();}

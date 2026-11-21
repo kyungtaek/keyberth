@@ -112,3 +112,5 @@ main {display:grid;grid-template-columns:minmax(315px,.85fr) minmax(470px,1.4fr)
 #appEditor {width:100%;margin-top:8px;}
 #overrideCount {display:block;margin:4px 0;color:var(--muted);}
 .board [data-override] {border-style:dashed;}
+
+.presetTools {display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;}

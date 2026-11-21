@@ -139,7 +139,7 @@ ipcMain.handle('command', async (event, method, data) => {
     throw new Error('Obsidian 보관함 안의 Markdown 문서를 선택하세요.');
   }
   if (method === 'editor' && ['mapping','device','sessions'].includes(data?.view)) return openEditor(data.view);
-  if (!['state','catalog','appMenus','runningApps','save','select','connect','readPrefs','savePrefs','readLighting','saveLighting','activateProfile','toggleAuto','configureClaude'].includes(method)) throw new Error('Unknown command');
+  if (!['state','catalog','appMenus','runningApps','applyPreset','save','select','connect','readPrefs','savePrefs','readLighting','saveLighting','activateProfile','toggleAuto','configureClaude'].includes(method)) throw new Error('Unknown command');
   const result = await request(method, data);
   return result;
 });
