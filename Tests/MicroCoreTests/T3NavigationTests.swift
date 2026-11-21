@@ -11,6 +11,11 @@ final class T3NavigationTests: XCTestCase {
         XCTAssertEqual(second.absoluteString, "t3code://threads/two/same")
         XCTAssertNotEqual(first, second)
     }
+    func testVisibleThreadIncludesEnvironmentAndIgnoresQuery() throws {
+        let route=try XCTUnwrap(URL(string:"t3code://app/#/env/thread?panel=right"))
+        XCTAssertTrue(T3Navigation.matchesVisibleRoute(route,threadURL:URL(string:"t3code://threads/env/thread")!))
+        XCTAssertFalse(T3Navigation.matchesVisibleRoute(route,threadURL:URL(string:"t3code://threads/another/thread")!))
+    }
     func testRejectsVersionAndUntrustedComponents() {
         let key = Key(environment: "test", thread: "demo")
         for version in ["0.1.6", "0.1.8", "v0.1.7", "0.1.7-beta", ""] {

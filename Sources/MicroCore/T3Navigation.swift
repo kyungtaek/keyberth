@@ -11,6 +11,13 @@ public enum T3Navigation {
         return components.url
     }
 
+    public static func matchesVisibleRoute(_ route:URL, threadURL:URL) -> Bool {
+        guard route.scheme == "t3code", route.host == "app",
+              threadURL.scheme == "t3code", threadURL.host == "threads",
+              let path = route.fragment?.components(separatedBy:"?").first else { return false }
+        return path == threadURL.path
+    }
+
     private static func valid(_ value: String) -> Bool {
         guard (1...128).contains(value.utf8.count), value != ".", value != ".." else { return false }
         return value.utf8.allSatisfy {

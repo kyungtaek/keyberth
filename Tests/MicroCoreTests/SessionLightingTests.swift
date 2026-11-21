@@ -29,6 +29,17 @@ final class SessionLightingTests: XCTestCase {
             XCTAssertEqual(params["ambient"]?["e"] as? Int,rules[expected.rawValue]?.ambient.effect)
         }
     }
+    func testKeyberthAmbientFollowsSelectionAndUsesPriorityWhenNoSessionIsSelected() {
+        let states:[SessionLight] = [.ready,.running,.attention,.empty,.empty,.empty]
+        func ambient(_ selection:Int?) -> String? {
+            SessionLighting.initial.agentStyles(states:states,selected:selection,includeAmbient:true).last
+        }
+        XCTAssertEqual(ambient(1),"0:268AFF:2:55:50")
+        XCTAssertEqual(ambient(2),"0:FF9800:4:55:50")
+        XCTAssertEqual(ambient(nil),ambient(2))
+        XCTAssertTrue(ambient(0)?.hasSuffix(":0:55:50") == true)
+    }
+
     func testInvalidSavedRuleIsRejected() {
         var rules=SessionLighting.initial.rules
         let invalid=SessionLighting.Style(color:"#GG00DD",effect:7)

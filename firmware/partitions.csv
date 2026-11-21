@@ -1,0 +1,11 @@
+# 已有应用和数据地址不变；未列出的旧数据也不能擦除。
+# Name, Type, SubType, Offset, Size, Flags
+nvs, data, nvs, 0x9000, 0x6000,
+otadata, data, ota, 0xF000, 0x2000,
+factory, app, factory, 0x20000, 0x200000,
+ota_0, app, ota_0, 0x220000, 0x400000,
+ota_1, app, ota_1, 0x620000, 0x400000,
+coredump, data, coredump, 0xA20000, 0x10000,
+diaglog, data, nvs, 0xA30000, 0x80000,
+# 0xAB0000..0xC2FFFF 留给其他固件的已有配置和日志。
+basic_nvs, data, nvs, 0xC30000, 0x10000,

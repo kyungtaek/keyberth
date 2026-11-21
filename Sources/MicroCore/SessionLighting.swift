@@ -30,7 +30,7 @@ public struct SessionLighting: Codable, Equatable {
         default: color=String(format:"#%06X",state.rgb)
         }
         let effect = [.unknown,.empty].contains(state) ? 0 : ([.attention,.running].contains(state) ? 4 : 1)
-        return (state.rawValue,Rule(slot:Style(color:color,effect:effect),ambient:Style(color:color,effect:0)))
+        return (state.rawValue,Rule(slot:Style(color:color,effect:effect),ambient:Style(color:color,effect:state == .running ? 2 : (state == .attention ? 4 : 0))))
     }))
 
     /// Migrate only unchanged factory colors, preserving user-selected colors,
@@ -52,11 +52,27 @@ public struct SessionLighting: Codable, Equatable {
         return states.firstIndex(of:.running)
     }
 
-    public func commands(states:[SessionLight], selected:Int?, firstID:Int, firmwareSlot:Int? = nil) throws -> [[[UInt8]]] {
-        guard valid, states.count == 6 else { throw LED.Invalid.colors }
+    private func ambientState(states:[SessionLight],selected:Int?) -> SessionLight {
         let priority: [SessionLight] = [.attention,.running,.done,.active,.ready,.unknown,.empty]
         let focus = selected.flatMap { states.indices.contains($0) && states[$0] != .empty ? states[$0] : nil }
-        let ambient = focus ?? priority.first(where:states.contains) ?? .empty
+        return focus ?? priority.first(where:states.contains) ?? .empty
+    }
+
+    public func agentStyles(states:[SessionLight], selected:Int?, includeAmbient:Bool) -> [String] {
+        guard valid, states.count == 6 else { return [] }
+        func payload(_ target:Int, _ style:Style) -> String {
+            "\(target):\(style.color.dropFirst()):\(style.effect):55:50"
+        }
+        var styles = states.enumerated().map { payload($0.offset+1, rules[$0.element.rawValue]!.slot) }
+        if includeAmbient {
+            styles.append(payload(0,rules[ambientState(states:states,selected:selected).rawValue]!.ambient))
+        }
+        return styles
+    }
+
+    public func commands(states:[SessionLight], selected:Int?, firstID:Int, firmwareSlot:Int? = nil) throws -> [[[UInt8]]] {
+        guard valid, states.count == 6 else { throw LED.Invalid.colors }
+        let ambient = ambientState(states:states,selected:selected)
         let slots = states.enumerated().compactMap { index, state -> [String:Any]? in
             guard index != firmwareSlot else { return nil }
             var item = rules[state.rawValue]!.slot.fields

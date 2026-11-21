@@ -13,9 +13,21 @@ struct CompanionError: LocalizedError {
 enum AgentDevice {
     static let firmware = "0.2.18-ai-micro-agent"
 
+    static let developmentFirmware = "0.4.0-keyberth"
+    static func hasKeyLighting(_ version:String) -> Bool { [developmentFirmware,"0.3.0-keyberth","0.2.0-keyberth","0.1.0-keyberth-dev"].contains(version) }
+
     // Walk up from the callout node to its USB device. The location also ties
     // the CDC version reply to the HID collection used for input and lights.
-    static func port() throws -> (path: String, location: Int, instance: UInt64) {
+    typealias Port = (path:String,location:Int,instance:UInt64)
+    static func port() throws -> Port {
+        guard let found=try usbPort() else { throw CompanionError("AI Micro를 USB로 연결하세요.") }
+        return found
+    }
+    static func connection() throws -> (Int?,String) {
+        if let found=try usbPort() { return (found.location,try verify(found.path)) }
+        return (nil,developmentFirmware)
+    }
+    static func usbPort() throws -> Port? {
         var iterator: io_iterator_t = 0
         guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching(kIOSerialBSDServiceValue), &iterator) == KERN_SUCCESS else {
             throw CompanionError("USB 시리얼 목록을 읽을 수 없습니다.")
@@ -36,11 +48,16 @@ enum AgentDevice {
             guard IORegistryEntryGetRegistryEntryID(entry, &instance) == KERN_SUCCESS else { continue }
             matches.append((path, location, instance))
         }
+        if matches.isEmpty { return nil }
         guard matches.count == 1 else { throw CompanionError("AI Micro USB 연결 \(matches.count)개 · 한 대를 연결하세요.") }
         return matches[0]
     }
 
+    private static let serialLock = NSLock()
+
     static func withSerial<T>(_ path: String, perform: (Int32) throws -> T) throws -> T {
+        serialLock.lock()
+        defer { serialLock.unlock() }
         let fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK)
         guard fd >= 0 else { throw CompanionError("USB 포트를 열 수 없습니다. 사용 중인 앱을 확인하세요.") }
         defer { close(fd) }
@@ -78,16 +95,17 @@ enum AgentDevice {
         throw CompanionError("USB 응답 시간 초과 · " + prefix)
     }
 
-    static func verify(_ fd: Int32) throws {
+    @discardableResult static func verify(_ fd: Int32) throws -> String {
         let data = try query(fd, command: "UPDATE_INFO", prefix: "CMUPDATE_INFO")
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        guard json?["firmwareVersion"] as? String == firmware,
+        guard let version = json?["firmwareVersion"] as? String, (version == firmware || hasKeyLighting(version)),
               json?["hardwareRevision"] as? String == "AI Micro" else {
             throw CompanionError("지원 대상과 다른 펌웨어입니다.")
         }
+        return version
     }
 
-    static func verify(_ path: String) throws {
+    @discardableResult static func verify(_ path: String) throws -> String {
         try withSerial(path, perform: verify)
     }
 
@@ -105,19 +123,18 @@ final class AgentHID {
     private var seq = 0, inputSeq = 0
     private var stage = 0
     private var pending: (name: String, value: String?, deadline: TimeInterval)?
-    private let location: Int
+    private let location: Int?
     private var wantedLighting: LightingOutput.Frame?
     private var lastLighting: LightingOutput.Frame?
     private var nextLightingAttempt = 0.0
     private var lightingBusy = false
     private(set) var lightingStatus = ""
-    func retryLighting() { lastLighting = nil }
+    func retryLighting() { lastLighting = nil; appliedStyles.removeAll() }
     private func applyLighting() {
-        guard !lightingBusy, now >= nextLightingAttempt, let desired = wantedLighting, desired != lastLighting else { return }
+        guard let location, !lightingBusy, now >= nextLightingAttempt, let desired = wantedLighting, desired != lastLighting else { return }
         lightingBusy = true
         lastLighting = desired
         lightingStatus = "조명 적용 중"
-        let location = self.location
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             let message: String, failed: Bool
             do { try LightingOutput.apply(desired,location:location); message = "기기에서 조명 설정 수신"; failed = false }
@@ -130,26 +147,33 @@ final class AgentHID {
             }
         }
     }
+    var supportsKeyLighting: Bool { AgentDevice.hasKeyLighting(expectedVersion) }
+    var sendReady = false
+    private var expectedVersion: String
+    private var appliedStyles = Set<String>()
     private var frame: String?, selected: String?
     private var sentFrame: String?, sentSelected: String?
     private var lastWrite = 0.0
-    private var stopped = false
+    private(set) var stopped = false
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
-    init(location: Int, status: @escaping (String) -> Void, release: @escaping (DeckInput) -> Void = { _ in }, press: @escaping (DeckInput) -> Void) throws {
+    init(location: Int?, expectedVersion: String = AgentDevice.firmware, status: @escaping (String) -> Void, release: @escaping (DeckInput) -> Void = { _ in }, press: @escaping (DeckInput) -> Void) throws {
+        self.expectedVersion = expectedVersion
         self.location = location
         self.status = status
         self.release = release
         self.press = press
         let manager = IOHIDManagerCreate(nil, 0)
-        IOHIDManagerSetDeviceMatching(manager, [kIOHIDTransportKey: "USB", kIOHIDVendorIDKey: 0x303a,
+        IOHIDManagerSetDeviceMatching(manager, [kIOHIDVendorIDKey: 0x303a,
             kIOHIDProductIDKey: 0x8360, kIOHIDDeviceUsagePageKey: 0xff31, kIOHIDDeviceUsageKey: 1] as CFDictionary)
         let matches = (IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> ?? []).filter {
-            IOHIDDeviceGetProperty($0, kIOHIDLocationIDKey as CFString) as? Int == location
+            let transport=IOHIDDeviceGetProperty($0,kIOHIDTransportKey as CFString) as? String
+            if let location { return transport=="USB" && IOHIDDeviceGetProperty($0,kIOHIDLocationIDKey as CFString) as? Int == location }
+            return transport?.hasPrefix("Bluetooth") == true
         }
         guard matches.count == 1, let device = matches.first, IOHIDDeviceOpen(device, 0) == 0 else {
             buffer.deallocate()
-            throw CompanionError("Universal Agent USB HID 연결 실패")
+            throw CompanionError(location == nil ? "Bluetooth에서 AI Micro 연결 대기" : "Universal Agent USB HID 연결 실패")
         }
         self.device = device
         let ctx = Unmanaged.passUnretained(self).toOpaque()
@@ -204,7 +228,14 @@ final class AgentHID {
                 if let frame, frame != sentFrame { try command("AMFRAME", frame) }
                 else if let selected, selected != sentSelected { try command("AMSELECT", selected) }
                 else {
-                    applyLighting()
+                    if supportsKeyLighting, let desired = wantedLighting {
+                        let sendStyle = sendReady ? "13:00FF00:4:65:35" : "13:000000:0:0:0"
+                        let styles = [sendStyle] + desired.palette.agentStyles(states:desired.states, selected:desired.selected, includeAmbient:true)
+                        if let next = styles.first(where:{ !appliedStyles.contains($0) }) {
+                            try command("KBLED",next)
+                            return
+                        }
+                    } else { applyLighting() }
                     if now - lastWrite >= 1 { try command("AMHEARTBEAT") }
                 }
             }
@@ -218,10 +249,13 @@ final class AgentHID {
             guard pending?.name == "AMHELLO",
                   let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
                   obj["session"] as? String == session else { return }
-            guard obj["version"] as? String == AgentDevice.firmware, obj["protocol"] as? String == "ai-micro-agent-v1",
+            guard let reportedVersion = obj["version"] as? String,
+                  reportedVersion == expectedVersion || (location == nil && reportedVersion == "0.3.0-keyberth"), obj["protocol"] as? String == "ai-micro-agent-v1",
                   obj["hardware"] as? String == "AI Micro", obj["slots"] as? Int == 6,
-                  let caps = obj["capabilities"] as? [String], ["input-events","slot-states","selected-slot"].allSatisfy(caps.contains)
+                  let caps = obj["capabilities"] as? [String], ["input-events","slot-states","selected-slot"].allSatisfy(caps.contains),
+                  !supportsKeyLighting || caps.contains("keyberth-light-v1")
             else { fail("지원 대상과 다른 Universal Agent 펌웨어"); return }
+            expectedVersion = reportedVersion
             pending = nil
             stage = 1
         case "AMACK":
@@ -229,8 +263,15 @@ final class AgentHID {
             pending = nil
             switch request.name {
             case "AMMODE": stage = 2
-            case "AMKEYMODE": stage = 3; status("USB 연결됨 · " + AgentDevice.firmware)
-            case "AMFRAME": lastLighting = nil; sentFrame = request.value; trace("frame ACK " + (sentFrame ?? ""))
+            case "AMKEYMODE": stage = 3; status((location == nil ? "Bluetooth" : "USB") + " 연결됨 · " + expectedVersion)
+            case "KBLED":
+                if let value = request.value, let target = value.split(separator:":").first {
+                    appliedStyles = appliedStyles.filter { $0.split(separator:":").first != target }
+                    appliedStyles.insert(value)
+                    trace("KBLED ACK " + (request.value ?? ""))
+                    lightingStatus = "펌웨어 조명 설정 수신"
+                }
+            case "AMFRAME": appliedStyles.removeAll(); lastLighting = nil; sentFrame = request.value; trace("frame ACK " + (sentFrame ?? ""))
             case "AMSELECT": lastLighting = nil; sentSelected = request.value; trace("selected ACK " + (sentSelected ?? ""))
             default: break
             }

@@ -12,6 +12,7 @@ app="$temp/MicroCompanion.app"
 ditto node_modules/electron/dist/Electron.app "$app"
 res="$app/Contents/Resources"
 mkdir -p "$res/app"
+bash scripts/build-firmware-manager.sh "$res/firmware"
 cp -R electron package.json package-lock.json "$res/app/"
 (cd "$res/app" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
 rm -f "$res/default_app.asar"

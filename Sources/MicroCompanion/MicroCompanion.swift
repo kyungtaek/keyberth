@@ -6,15 +6,14 @@ import MicroCore
         if CommandLine.arguments.contains("--claude-hook") { try? ClaudeCodeHook.run(); return }
         if CommandLine.arguments.contains("--check-device") {
             do {
-                let (path, location, _) = try AgentDevice.port()
-                try AgentDevice.verify(path)
-                print("USB CDC: " + AgentDevice.firmware)
+                let (location, version) = try AgentDevice.connection()
+                if location != nil { print("USB CDC: " + version) }
                 var reply: String?
-                let hid = try AgentHID(location: location, status: { reply = $0 }, press: { _ in })
+                let hid = try AgentHID(location: location, expectedVersion:version, status: { reply = $0 }, press: { _ in })
                 let deadline = Date().addingTimeInterval(8)
                 while reply == nil && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
                 hid.close()
-                guard let reply, reply.hasPrefix("USB 연결됨") else { throw CompanionError(reply ?? "USB HID 응답 시간 초과") }
+                guard let reply, reply.contains(" 연결됨 · ") else { throw CompanionError(reply ?? "USB HID 응답 시간 초과") }
                 print(reply)
                 exit(0)
             } catch { fputs(error.localizedDescription + "\n", stderr); exit(1) }
@@ -63,7 +62,7 @@ import MicroCore
         guard next != profile else { return }
         finishMic()
         selectedClaudeCode = nil
-        visibleCodex = nil
+        visibleDesktop = nil
         if profile == .claudeCode { ClaudeCodeHook.endLease() }
         if next == .claude || next == .claudeCode { KeyMap.preferences.set(next.rawValue, forKey:"preferredClaudeProfile") }
         if profile == .slack { slackQueue.removeAll(); slackTask?.cancel(); SlackDesktop.clearSlots() }
@@ -214,9 +213,9 @@ import MicroCore
         if source == .claudeCode, profile == source { selectedClaudeCode = item.url; updateLights() }
     }
     private var sessions = [DesktopSession?]()
-    private var visibleCodex: URL?
+    private var visibleDesktop: URL?
     private var selectedSession: URL? {
-        profile == .codex ? visibleCodex : (profile == .claudeCode ? selectedClaudeCode : nil)
+        profile == .claudeCode ? selectedClaudeCode : visibleDesktop
     }
     private var sessionGeneration = UUID()
     private var pendingGeneration: UUID?
@@ -238,15 +237,21 @@ import MicroCore
                 let items = try await Task.detached { try DesktopSessions.read(source) }.value
                 guard generation == sessionGeneration else { return }
                 if source == .codex {
-                    visibleCodex = DesktopSessions.visibleCodexSession(in:items)
-                    if let visibleCodex, NSWorkspace.shared.frontmostApplication?.bundleIdentifier == source.bundleIDs.first {
-                        completions.markViewed(visibleCodex.absoluteString)
+                    visibleDesktop = DesktopSessions.visibleCodexSession(in:items)
+                    if let visibleDesktop, NSWorkspace.shared.frontmostApplication?.bundleIdentifier == source.bundleIDs.first {
+                        completions.markViewed(visibleDesktop.absoluteString)
+                    }
+                }
+                if source == .t3 {
+                    visibleDesktop = T3Controls.visibleRoute().flatMap { route in
+                        items.first { T3Navigation.matchesVisibleRoute(route,threadURL:$0.url) }?.url
                     }
                 }
                 sessions = rankedSessions(items,source:source)
                 sessionStatus = source.title + " · 슬롯 " + String(items.count) + "/6"
             } catch {
                 guard generation == sessionGeneration else { return }
+                visibleDesktop = nil
                 sessions = []
                 sessionStatus = source.title + " · " + error.localizedDescription
             }
@@ -546,6 +551,28 @@ import MicroCore
     private var epoch = UUID()
     private var refreshing = false
     private var timer: Timer?
+    private var composerTimer: Timer?
+    private var checkingComposer = false
+    private func refreshComposer() {
+        guard let device, device.supportsKeyLighting else { return }
+        let source=profile
+        let action=binding("K13",in:source)
+        guard ["agent.submit","enter"].contains(action), let front=NSWorkspace.shared.frontmostApplication,
+              source.bundleIDs.contains(front.bundleIdentifier ?? ""), [.codex,.claude,.t3].contains(source) else {
+            device.sendReady=false
+            return
+        }
+        guard !checkingComposer else { return }
+        checkingComposer=true
+        let pid=front.processIdentifier
+        Task {
+            let ready=await Task.detached { ComposerAvailability.canSubmit(in:source,pid:pid) }.value
+            checkingComposer=false
+            guard self.device === device, profile == source, binding("K13",in:source) == action,
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+            device.sendReady=ready
+        }
+    }
 
     func start() {
         if profile != .unconfigured, !enabled.contains(profile) { activate(enabled.first ?? .unconfigured,notify:false) }
@@ -556,14 +583,23 @@ import MicroCore
         }
         follow(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, notify:false)
         connect()
+        composerTimer = Timer.scheduledTimer(withTimeInterval:0.4,repeats:true) { [weak self] _ in
+            Task { @MainActor in self?.refreshComposer() }
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+            Task { @MainActor in
+                guard let self else { return }
+                if self.device?.stopped != false && !self.connecting { self.connect() }
+                else { self.refresh() }
+            }
         }
     }
     func stop() {
         if profile == .claudeCode { ClaudeCodeHook.endLease() }
         finishMic()
         if let focusObserver { NSWorkspace.shared.notificationCenter.removeObserver(focusObserver); self.focusObserver = nil }
+        composerTimer?.invalidate()
+        composerTimer=nil
         timer?.invalidate()
         timer = nil
         epoch = UUID()
@@ -582,14 +618,12 @@ import MicroCore
         deviceStatus = "USB 펌웨어 확인 중"
         Task { [self] in
             do {
-                let location = try await Task.detached {
-                    let (path, location, _) = try AgentDevice.port()
-                    try AgentDevice.verify(path)
-                    return location
+                let (location,version) = try await Task.detached {
+                    try AgentDevice.connection()
                 }.value
                 guard epoch == token else { return }
                 deviceStatus = "Universal Agent 세션 연결 중"
-                device = try AgentHID(location: location, status: { [weak self] message in
+                device = try AgentHID(location: location, expectedVersion:version, status: { [weak self] message in
                     if self?.epoch == token { self?.deviceStatus = message; if message.contains("다시 연결") { self?.finishMic() } }
                 }, release: { [weak self] input in self?.release(input) }, press: { [weak self] key in
                     guard self?.epoch == token else { return }
@@ -602,7 +636,7 @@ import MicroCore
         }
     }
     func refresh() {
-        if profile == .claudeCode, deviceStatus.hasPrefix("USB 연결됨") { ClaudeCodeHook.heartbeat() }
+        if profile == .claudeCode, deviceStatus.contains(" 연결됨 · ") { ClaudeCodeHook.heartbeat() }
         refreshDesktop()
         refreshCombined()
         guard enabled.contains(.cmux) else { return }
@@ -655,7 +689,8 @@ import MicroCore
         let id: Int
         let method: String
         let input, binding, target, profile, scope: String?
-        let volume, sleep: Int?
+        let volume, sleep, brightness: Int?
+        let styles: [String]?
         let archive: KeymapArchive?
         let revision: UInt32?
         let lightState: String?
@@ -877,11 +912,14 @@ import MicroCore
                           (0...120).contains(sleep), (0...100).contains(volume) else {
                         throw CompanionError("기기 설정을 다시 읽어 주세요.")
                     }
-                    return try DevicePreferences.save(old, sleep: sleep, volume: volume)
+                    return try DevicePreferences.save(old, sleep: sleep, volume: volume, brightness: r.brightness, styles: r.styles)
                 }.value
                 preferences = value
-                result["value"] = ["sleep": value.value.sleepMinutes, "volume": value.value.volumePercent,
-                                   "revision": value.value.revision, "buzzer": value.value.buzzerEnabled] as [String: Any]
+                var settings: [String: Any] = ["sleep": value.value.sleepMinutes, "volume": value.value.volumePercent,
+                                   "revision": value.value.revision, "buzzer": value.value.buzzerEnabled]
+                settings["brightness"] = value.value.brightness
+                settings["styles"] = value.value.styles
+                result["value"] = settings
             default: throw CompanionError("알 수 없는 요청")
             }
         } catch { result["error"] = error.localizedDescription }

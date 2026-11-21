@@ -198,7 +198,7 @@ import MicroCore
             guard buttons.count == 1 else { throw CompanionError("현재 대화에서 해당 동작을 사용할 수 없습니다.") }
             try buttons[0].press()
         case "agent.submit":
-            let buttons=try Context().buttons(["Submit message","Queue message","Steer message","Compact and send","Update queued message"])
+            let buttons=try Context().buttons(ComposerAvailability.t3SendLabels)
             guard buttons.count == 1 else { throw CompanionError("보낼 수 있는 T3 메시지가 없습니다.") }
             try buttons[0].press()
         default: throw CompanionError("알 수 없는 T3 기능입니다.")

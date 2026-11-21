@@ -103,13 +103,16 @@ function openEditor(view = 'mapping') {
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', show);
   else show();
 }
+const firmwareControls=require('./firmware.cjs').firmwareControls(app,dialog,()=>request('connect'));
 ipcMain.handle('command', async (event, method, data) => {
   if (fileURLToPath(event.senderFrame.url) !== page) throw new Error('Unknown window');
+  if (method==='manageFirmware' && editor && event.sender===editor.webContents)
+    return firmwareControls.manage(data?.action);
   if (['addProfile','removeProfile','addFavorite','removeFavorite'].includes(method)) {
     if (!editor || event.sender!==editor.webContents) throw Error('편집 창에서 키맵을 관리하세요.');
     if (method==='removeFavorite') return request(method,{profile:data.profile});
     if (method==='removeProfile') {
-      const choice=await dialog.showMessageBox(editor,{message:'선택한 앱의 키맵을 삭제할까요?',detail:'저장된 키 배정도 삭제됩니다.',buttons:['취소','삭제'],cancelId:0,defaultId:0});
+      const choice=await dialog.showMessageBox(editor,{message:(data.name || data.profile)+' 키맵을 삭제할까요?',detail:'저장된 키 배정도 삭제됩니다.',buttons:['취소','삭제'],cancelId:0,defaultId:0});
       return choice.response===1 ? request(method,{profile:data.profile}) : null;
     }
     if (data?.profile) return request(method,{profile:data.profile});
@@ -156,6 +159,7 @@ else {
     const permissionGuide = installPermissionGuide(request, () => editor);
     const checkUpdates = require('./updates.cjs').configureUpdates(() => { quitting = true; });
     const items = [{ label:'키 매핑', click:()=>openEditor() }, { label:'기기 설정…', accelerator:'Cmd+,', click:()=>openEditor('device') },
+      firmwareControls.menu,
       {label:'권한 안내…', click:()=>{ openEditor(); permissionGuide.showOnDemand(); }},
       {label:'업데이트 확인…',click:checkUpdates}, {type:'separator'}, {label:'Keyberth 종료', role:'quit'}];
     tray.on('right-click', async () => {

@@ -114,6 +114,17 @@ function graphic(name) {
   img.draggable = false;
   return img;
 }
+function capMaterial(id) {
+  const saved=localStorage.getItem('keyberth.cap.'+id);
+  if(saved==='clear'||saved==='opaque')return saved;
+  return /^K(0[1-6]|13)$/.test(id)?'clear':'opaque';
+}
+$('capMaterial').onchange=()=>{
+  if(!/^K(0[1-9]|1[0-3])$/.test(selected))return;
+  const value=$('capMaterial').value;
+  localStorage.setItem('keyberth.cap.'+selected,value);
+  buttons.get(selected).dataset.material=value;
+};
 let previewKey='K01';
 let liveSlots=[];
 function simulating() { return view==='device' && !$('lighting').hidden; }
@@ -126,6 +137,7 @@ function createKey(id, icon) {
   });
   b.dataset.control = id;
   if (number) {
+    b.dataset.material=capMaterial(id);
     const num = document.createElement('span'), label = document.createElement('span');
     num.className = 'keyNum'; num.textContent = id.slice(1);
     label.className = 'capLabel';
@@ -257,6 +269,8 @@ function renderMapping() {
     }
   }
   $('keyTitle').textContent=selected.startsWith('K')?Number(selected.slice(1))+'번 키':byId.get(selected).name;
+  $('capMaterialField').hidden=!buttons.get(selected)?.dataset.material;
+  if(!$('capMaterialField').hidden)$('capMaterial').value=capMaterial(selected);
   $('keyId').textContent=selected;$('current').textContent=actionText(saved);
   const desktop = globalEdit() || editProfile !== 'cmux';
   $('appEditor').hidden=globalEdit();
@@ -341,19 +355,26 @@ function renderState(next) {
   if (profilesChanged) {
     if(!next.profiles.some(p=>p.id===editProfile))editProfile='';
     const present=new Set(next.profiles.map(p=>p.id));
-    $('manageProfile').replaceChildren(new Option('응용 프로그램 선택…',''),...next.profiles.map(p=>new Option(p.name,p.id)),
-      ...catalog.templates.filter(p=>!present.has(p.id)).map(p=>new Option(p.name+' (추가 가능)',p.id)));
-    $('manageProfile').value=next.profiles.find(p=>p.id===next.profile)?.id || '';
+    const picker=$('manageProfile'), managementTarget=picker.value;
+    picker.replaceChildren(...next.profiles.map(p=>new Option(p.name,p.id)));
+    picker.value=present.has(managementTarget)?managementTarget:'';
+    $('emptyProfiles').hidden=present.size>0;
+    picker.hidden=present.size===0;
+    const choice=$('addKeymapChoice'), previous=choice.value;
+    choice.replaceChildren(new Option('응용 프로그램 선택…',''),...catalog.templates.filter(p=>!present.has(p.id)).map(p=>new Option(p.name,p.id)));
+    if([...choice.options].some(option=>option.value===previous))choice.value=previous;
   }
   state=next; if(profilesChanged) fillProcesses();
   if(profilesChanged || assignmentsChanged)buildFunctions(editProfile);
   $('activeName').textContent=next.profiles.find(p=>p.id===next.profile)?.name || '글로벌';
   $('manageProfile').onchange();
   $('auto').textContent='자동 전환 '+(next.automatic?'켬':'끔'); $('auto').setAttribute('aria-pressed',String(next.automatic));
+  $('firmwareConnection').textContent=next.usb || '연결 대기';
   $('usb').textContent=next.usb;$('cmux').textContent=next.cmux;
   $('usb').title=next.usb;$('cmux').title=next.cmux;
   $('connect').disabled=next.busy;
   $('lightStatus').textContent=next.lightingStatus;
+  $('firmwareName').textContent=next.usb?.includes('0.4.0-keyberth') ? '키버스-펌웨어 / 0.4.0' : next.usb?.includes('0.3.0-keyberth') ? '키버스-펌웨어 / 0.3.0' : next.usb?.includes('0.2.0-keyberth') ? '키버스-펌웨어 / 0.2.0' : next.usb?.includes('0.1.0-keyberth-dev') ? 'Keyberth USB / 0.1.0-dev' : next.usb?.includes('0.2.18') ? 'Universal Agent / 0.2.18' : 'AI Micro';
   for(const [i,local] of next.slots.entries()){
     const input='K'+String(i+1).padStart(2,'0');
     const value=next.mappings[input] || '';
@@ -378,12 +399,65 @@ async function poll() {
 let lightRules;
 let savingLight = false;
 const lightDrafts = new Map();
+// Each row contains 16 shades. The first row is neutral.
+const paletteColors=Array.from({length:16},(_,i)=>'#'+(i*17).toString(16).padStart(2,'0').repeat(3));
+for(const hue of [0,15,30,45,60,85,120,150,175,195,215,240,265,290,325]){
+  for(let i=0;i<16;i++){
+    const value=Math.min(1,(i+2)/9), saturation=Math.min(1,(16-i)/9);
+    const channel=n=>{
+      const k=(n+hue/60)%6;
+      return Math.round(255*value*(1-saturation*Math.max(0,Math.min(k,4-k,1)))).toString(16).padStart(2,'0');
+    };
+    paletteColors.push('#'+channel(5)+channel(3)+channel(1));
+  }
+}
+let paletteTarget;
+function setLightColor(control,value){
+  control.value=value;
+  control.style.setProperty('--swatch',value);
+  control.title=value.toUpperCase();
+}
+function attachPalette(control){
+  control.classList.add('paletteTrigger');
+  control.setAttribute('aria-haspopup','dialog');
+  control.onclick=()=>{
+    paletteTarget=control;
+    const index=paletteColors.indexOf(control.value.toLowerCase());
+    const cells=$('paletteColors').children;
+    for(let i=0;i<cells.length;i++){
+      cells[i].setAttribute('aria-pressed',String(i===index));
+      cells[i].tabIndex=i===Math.max(0,index)?0:-1;
+    }
+    $('colorPalette').showModal();
+    cells[Math.max(0,index)].focus();
+  };
+}
+for(const [i,value] of paletteColors.entries()){
+  const cell=document.createElement('button');
+  cell.style.setProperty('--swatch',value);
+  cell.title=value.toUpperCase();cell.setAttribute('aria-label',cell.title);
+  cell.onclick=()=>{
+    setLightColor(paletteTarget,value);
+    paletteTarget.dispatchEvent(new Event('input',{bubbles:true}));
+    $('colorPalette').close();
+  };
+  cell.onkeydown=e=>{
+    const offsets={ArrowLeft:-1,ArrowRight:1,ArrowUp:-16,ArrowDown:16};
+    if(!Object.hasOwn(offsets,e.key))return;
+    e.preventDefault();cell.tabIndex=-1;
+    const next=$('paletteColors').children[Math.max(0,Math.min(255,i+offsets[e.key]))];
+    next.tabIndex=0;next.focus();
+  };
+  $('paletteColors').append(cell);
+}
+$('closePalette').onclick=()=>$('colorPalette').close();
+attachPalette($('physicalColor'));
 const lightInputs = {};
 const effects = ['끄기','고정','흐르기','무지개','숨쉬기','그라데이션','은은한 숨쉬기'];
 for(const [zone,title] of [['slot','슬롯 LED'],['ambient','바닥 조명']]) {
   const row=group('lightRow'), label=document.createElement('strong');
-  const color=document.createElement('input'), effect=document.createElement('select');
-  label.textContent=title; color.type='color';
+  const color=document.createElement('button'), effect=document.createElement('select');
+  label.textContent=title; attachPalette(color);
   color.setAttribute('aria-label',title+' 색상'); effect.setAttribute('aria-label',title+' 애니메이션');
   effects.forEach((text,i)=>effect.add(new Option(text,String(i))));
   color.oninput=effect.onchange=()=>{
@@ -431,7 +505,7 @@ function renderLights() {
   syncPicker($('lightState'),$('lightBar'));
   const key=$('lightState').value, rule=lightDrafts.get(key) || lightRules[key];
   for(const [zone,inputs] of Object.entries(lightInputs)){
-    inputs.color.value=rule[zone].color;inputs.effect.value=rule[zone].effect;
+    setLightColor(inputs.color,rule[zone].color);inputs.effect.value=rule[zone].effect;
     syncPicker(inputs.effect,inputs.styles);
   }
   $('saveLight').disabled=savingLight;
@@ -454,17 +528,55 @@ $('saveLight').onclick=async()=>{
     announce('조명 설정을 이 Mac에 저장했습니다.');
   } catch(e){fail(e);} finally{savingLight=false;renderLights();}
 };
+let editedStyles=[], lightTarget=0;
+const physicalFields=['physicalColor','physicalEffect','physicalLevel','physicalSpeed'];
+function showPhysicalTarget(){
+  const style=editedStyles[lightTarget]||'';
+  const fallback=style||'ffffff16432';
+  $('lightTargetName').textContent=lightTarget?lightTarget+'번 키 조명':'바닥 조명';
+  $('overrideLight').checked=Boolean(style);
+  setLightColor($('physicalColor'),'#'+fallback.slice(0,6));
+  $('physicalEffect').selectedIndex=Number(fallback[6]);
+  $('physicalLevel').value=parseInt(fallback.slice(7,9),16);
+  $('physicalSpeed').value=parseInt(fallback.slice(9),16);
+  for(const button of $('lightTargets').children)button.setAttribute('aria-pressed',String(+button.value===lightTarget));
+  updatePrefsButtons();
+}
+for(let i=0;i<14;i++){
+  const button=document.createElement('button');button.value=String(i);button.textContent=i?String(i).padStart(2,'0'):'바닥';
+  button.setAttribute('aria-label',i?i+'번 키 조명':'바닥 조명');
+  button.onclick=()=>{lightTarget=i;showPhysicalTarget();};$('lightTargets').append(button);
+}
+function capturePhysicalStyle(){
+  const hex=id=>Number($(id).value).toString(16).padStart(2,'0');
+  if(!$('overrideLight').checked)editedStyles[lightTarget]='';
+  else if(['physicalLevel','physicalSpeed'].every(id=>$(id).value!==''&&$(id).validity.valid))
+    editedStyles[lightTarget]=$('physicalColor').value.slice(1)+$('physicalEffect').selectedIndex+hex('physicalLevel')+hex('physicalSpeed');
+  updatePrefsButtons();
+}
+for(const id of [...physicalFields,'overrideLight'])$(id).oninput=capturePhysicalStyle;
+$('masterLight').oninput=()=>updatePrefsButtons();
 function updatePrefsButtons(){
   const n=$('sleep').valueAsNumber;
   $('sleep').disabled=$('volume').disabled=!prefs||prefsBusy;
+  const hasLights=Array.isArray(prefs?.styles);
+  $('physicalLights').hidden=!hasLights;
+  $('masterLight').disabled=$('overrideLight').disabled=prefsBusy;
+  $('masterLightText').textContent=$('masterLight').value+'%';
+  $('automaticLight').hidden=$('overrideLight').checked;
+  $('physicalStyle').hidden=!$('overrideLight').checked;
+  for(const id of physicalFields)$(id).disabled=prefsBusy||!$('overrideLight').checked;
+  const invalidStyle=hasLights && $('overrideLight').checked && ['physicalLevel','physicalSpeed'].some(id=>$(id).value===''||!$(id).validity.valid);
+  const lightChanged=hasLights && (+$('masterLight').value!==prefs.brightness || JSON.stringify(editedStyles)!==JSON.stringify(prefs.styles));
   $('readPrefs').disabled=prefsBusy;
   $('volumeText').textContent=$('volume').value+'%';
-  $('savePrefs').disabled=!prefs||prefsBusy||!Number.isInteger(n)||n<0||n>120||(n===prefs.sleep && +$('volume').value===prefs.volume);
+  $('savePrefs').disabled=!prefs||prefsBusy||!Number.isInteger(n)||n<0||n>120||invalidStyle||(!lightChanged && n===prefs.sleep && +$('volume').value===prefs.volume);
 }
 async function device(save){
   if(prefsBusy)return;prefsBusy=true;updatePrefsButtons();
   try{
-    prefs=await api(save?'savePrefs':'readPrefs',save?{revision:prefs.revision,sleep:$('sleep').valueAsNumber,volume:+$('volume').value}:{});
+    prefs=await api(save?'savePrefs':'readPrefs',save?{revision:prefs.revision,sleep:$('sleep').valueAsNumber,volume:+$('volume').value,...(prefs.styles?{brightness:+$('masterLight').value,styles:editedStyles}:{})}:{});
+    editedStyles=[...(prefs.styles||[])];$('masterLight').value=prefs.brightness??100;showPhysicalTarget();
     $('sleep').value=prefs.sleep;$('volume').value=prefs.volume;$('buzzer').textContent=prefs.buzzer?'':'기기의 부저 스위치가 꺼져 있습니다.';
     if(save)announce('기기에서 저장된 값을 확인했습니다.');
   }catch(e){prefs=null;$('buzzer').textContent=e.message;}
@@ -506,6 +618,18 @@ function settingsPanel(id) {
 }
 for(const tab of document.querySelectorAll('[data-panel]')) tab.onclick=()=>settingsPanel(tab.dataset.panel);
 settingsPanel('hardware');
+const firmwareButtons=[...document.querySelectorAll('[data-firmware]')];
+for(const button of firmwareButtons)button.onclick=async()=>{
+  for(const item of firmwareButtons)item.disabled=true;
+  $('firmwareProgress').textContent='펌웨어 작업이 끝날 때까지 USB 연결을 유지하세요.';
+  try {
+    const result=await api('manageFirmware',{action:button.dataset.firmware});
+    const messages={current:'최신 키버스 펌웨어가 설치되어 있습니다.',done:'펌웨어 작업을 완료했습니다.',busy:'다른 펌웨어 작업이 진행 중입니다.',cancelled:'작업을 취소했습니다.',failed:'펌웨어 작업에 실패했습니다.'};
+    $('firmwareProgress').textContent=messages[result];
+    if(result==='done'){prefs=null;await device(false);await poll();}
+  } catch(error){$('firmwareProgress').textContent=error.message;}
+  finally{for(const item of firmwareButtons)item.disabled=false;}
+};
 function show(name){
   view=name;
   document.querySelector('.profileControls').hidden=name!=='mapping';
@@ -576,12 +700,24 @@ window.keyberth.onView(show);
 
 $('manageProfile').onchange=()=>{
   const present=state?.profiles.some(p=>p.id===$('manageProfile').value);
-  $('addProfile').disabled=!!present;
   $('removeProfile').disabled=!present;
 };
-for(const method of ['addProfile','removeProfile']) $(method).onclick=async()=>{
-  try {
-    const result=await api(method,{profile:$('manageProfile').value});
+$('addProfile').onclick=()=>{
+  $('addKeymapDialog').returnValue='';
+  $('addKeymapDialog').showModal();
+};
+$('addKeymapDialog').onclose=async()=>{
+  if($('addKeymapDialog').returnValue!=='add')return;
+  try{
+    const result=await api('addProfile',{profile:$('addKeymapChoice').value});
+    if(result){renderState(result);$('manageProfile').value=result.addedProfile;$('manageProfile').onchange();}
+  }catch(error){fail(error);}
+};
+$('removeProfile').onclick=async()=>{
+  const picker=$('manageProfile'), profile=picker.value;
+  if(!state.profiles.some(p=>p.id===profile))return;
+  try{
+    const result=await api('removeProfile',{profile,name:picker.selectedOptions[0].textContent});
     if(result){drafts.clear();renderState(result);renderMapping();}
   }catch(error){fail(error);}
 };
