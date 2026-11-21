@@ -42,10 +42,12 @@ def require(condition, message):
     if not condition:
         raise RuntimeError(message)
 
-def selection(sequence):
+def selection(sequence, state=2):
+    # The retained manufacturer bootloader applies ESP-IDF rollback semantics.
+    # After full readback, VALID persists across resets. NEW is a one-shot trial.
     selector=bytearray(b"\xff"*4096)
     selector[:4]=struct.pack("<I",sequence)
-    selector[24:28]=bytes(4)
+    selector[24:28]=struct.pack("<I",state)
     selector[28:32]=struct.pack("<I",binascii.crc32(selector[:4],0xffffffff))
     return bytes(selector)
 
@@ -202,6 +204,13 @@ def run(action, image):
         selected=read(SELECT,8192,original)
         current_slot=initial.get("running_partition")
         known_selection=any(current_slot==f"ota_{i-1}" and selected==selection(i)+b"\xff"*4096 for i in (1,2))
+        aborted_slot=next((i for i in (1,2) if selected==selection(i,4)+b"\xff"*4096),None)
+        if aborted_slot and initial["firmware"]==STOCK_VERSION:
+            # Reclaim an aborted trial only if its complete slot is ours.
+            contents=read(OTA_SLOTS[aborted_slot-1],OTA_SIZE,work/"aborted-slot.bin")
+            images=(*PREVIOUS_IMAGES,(len(content),IMAGE_HASH))
+            known_selection=any(hashlib.sha256(contents[:n]).hexdigest()==h and
+                                contents[n:]==b"\xff"*(OTA_SIZE-n) for n,h in images)
         require(selected==b"\xff"*8192 or known_selection,"기존 OTA 선택 보존을 위해 중단했습니다.")
         reserved=read(0xc30000,65536,work/"settings-before.bin")
         require(reserved==bytes([255])*65536 or reserved[0xf000:].startswith(b"keyberth-settings-v1\0"),"설정 영역에 다른 데이터가 있습니다.")
