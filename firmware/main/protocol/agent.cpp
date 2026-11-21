@@ -67,7 +67,7 @@ void Agent::command(const std::string& line,int64_t now) {
         std::string token(hello[1]); reset(); session=token; lights.individual=true; lastCommand=now;
         reply("AMHELLO\t{\"session\":\""+session+"\",\"protocol\":\"ai-micro-agent-v1\","
               "\"version\":\"" BASIC_VERSION "\",\"hardware\":\"AI Micro\",\"slots\":6,"
-              "\"capabilities\":[\"input-events\",\"slot-states\",\"selected-slot\",\"keyberth-light-v1\"]}");
+              "\"capabilities\":[\"input-events\",\"slot-states\",\"selected-slot\",\"keyberth-light-v1\",\"session-alert-v1\"]}");
         return;
     }
     std::array<std::string_view,4> fields{};
@@ -94,6 +94,8 @@ void Agent::command(const std::string& line,int64_t now) {
         unsigned target;
         if(integer(value.substr(0,value.find(':')),target) && target>=1 && target<=6)
             defaultRunning[target-1]=false;
+    } else if (controls() && name=="KBALERT" && (value=="attention" || value=="done")) {
+        if(alert) alert();
     } else if (name=="AMBYE" && value.empty()) { reply("AMACK\t"+std::to_string(seq)); reset(); return; }
     else if (name!="AMHEARTBEAT" || !value.empty()) { reply("MKERR\tinvalid_command"); return; }
     sequence=seq; lastCommand=now; reply("AMACK\t"+std::to_string(seq));

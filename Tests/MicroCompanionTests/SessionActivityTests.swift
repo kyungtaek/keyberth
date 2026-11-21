@@ -3,6 +3,25 @@ import MicroCore
 @testable import MicroCompanion
 
 final class SessionActivityTests: XCTestCase {
+    func testSessionAlertTransitions() {
+        var alerts = SessionAlerts()
+        func sample(_ state:SessionLight, _ revision:String="a", _ time:Double=1) -> String? {
+            alerts.observe(id:"session",state:state,revision:revision,now:time)
+        }
+        XCTAssertNil(sample(.done))
+        XCTAssertNil(sample(.done))
+        XCTAssertNil(sample(.running))
+        XCTAssertEqual(sample(.attention),"attention")
+        XCTAssertNil(sample(.attention))
+        XCTAssertNil(sample(.unknown))
+        XCTAssertNil(sample(.attention))
+        XCTAssertEqual(sample(.done),"done")
+        XCTAssertNil(sample(.done))
+        XCTAssertEqual(sample(.done,"b"),"done")
+        XCTAssertNil(sample(.ready))
+        XCTAssertNil(sample(.active))
+        XCTAssertNil(sample(.attention,"b",80))
+    }
     func testFourthSlotKeepsRankAcrossFocusReadAndReload() throws {
         var activity = SessionActivity()
         for i in 1...6 {

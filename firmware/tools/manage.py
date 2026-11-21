@@ -19,11 +19,12 @@ from serial.tools.list_ports import comports
 from verify_backup import STOCK, verify
 
 ROOT = Path.home() / "Library/Application Support/Keyberth/Recovery"
-VERSION = "0.4.2-keyberth"
+VERSION = "0.4.3-keyberth"
 PREVIOUS_VERSION = "0.2.0-keyberth"
 STOCK_VERSION = "0.2.18-ai-micro-agent"
-IMAGE_HASH = "056332209bec88e5bff2ea073b7db43c26d77bc7d68bc91624b219e29e5ef73a"
+IMAGE_HASH = "d0fffcb4609b1999e20183bb4d1c216877b0ef8ccade1a5f14be307fa003bdee"
 PREVIOUS_IMAGES = (
+    (671152, "056332209bec88e5bff2ea073b7db43c26d77bc7d68bc91624b219e29e5ef73a"),
     (670352, "0c46e683c6ae8c1383b630cbc87964a48b6ab01e2d2574f46f7e9db09b137ee3"),
     (670352, "8f144506356a3e624c95005d5e29028ef58d8e48f4e10834cdec08e89651ca5f"),
     (668192, "f1e902efd1127eb15065f84f2ac9a231b93c9b39890347797df828bba005972d"),
@@ -117,7 +118,7 @@ def run(action, image):
         require(initial.get("firmware")==STOCK_VERSION,"기존 키버스 펌웨어가 설치되어 있습니다. 업데이트를 선택하세요.")
     if action=="reset":
         reset_version=initial.get("firmware")
-        require(reset_version in ("0.4.0-keyberth","0.4.1-keyberth",VERSION),"공장 초기화는 키버스 펌웨어 0.4.0 이상에서 지원합니다.")
+        require(reset_version in ("0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth",VERSION),"공장 초기화는 키버스 펌웨어 0.4.0 이상에서 지원합니다.")
         check(reset_version)
         with serial.Serial(port.device,115200,timeout=1) as link:
             link.write(b"KEYBERTH FACTORY_RESET CONFIRM\n")
@@ -134,12 +135,12 @@ def run(action, image):
         wait_for(defaults,25)
         return reset_version
     if action=="update":
-        require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth",VERSION),"키버스 펌웨어에서 업데이트할 수 있습니다.")
+        require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth",VERSION),"키버스 펌웨어에서 업데이트할 수 있습니다.")
         require(hashlib.sha256(image.read_bytes()).hexdigest()==IMAGE_HASH,"이미지 체크섬 불일치")
         check(initial["firmware"])
     if action=="rollback":
         if initial.get("firmware")!=STOCK_VERSION:
-            require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth",VERSION),"지원하는 키버스-펌웨어만 롤백할 수 있습니다.")
+            require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth",VERSION),"지원하는 키버스-펌웨어만 롤백할 수 있습니다.")
             check(initial["firmware"])
             with serial.Serial(port.device,115200,timeout=1) as link:
                 link.write(b"KEYBERTH ROLLBACK\n");link.flush()

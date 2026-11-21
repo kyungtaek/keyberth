@@ -29,3 +29,29 @@ struct SessionActivity {
         return entry.time
     }
 }
+
+/// A connection starts with a silent snapshot. Track identities before any slot or focus changes.
+struct SessionAlerts {
+    private struct Observation {
+        let state: SessionLight
+        let revision: String?
+        let time: Double
+    }
+    private var observations = [String:Observation]()
+    private var lastPrune = 0.0
+
+    mutating func observe(id:String, state:SessionLight, revision:String?, now:Double) -> String? {
+        if now-lastPrune >= 60 {
+            observations = observations.filter { now-$0.value.time < 60 }
+            lastPrune = now
+        }
+        guard state != .unknown else { return nil }
+        let previous = observations.updateValue(Observation(state:state, revision:revision, time:now), forKey:id)
+        guard let previous, now-previous.time < 60 else { return nil }
+        let newTurn = revision != nil && previous.revision != nil && revision != previous.revision
+        guard previous.state != state || newTurn else { return nil }
+        if state == .attention { return "attention" }
+        if state == .done { return "done" }
+        return nil
+    }
+}

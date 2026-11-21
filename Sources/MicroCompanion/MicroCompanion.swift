@@ -161,6 +161,7 @@ import MicroCore
     private var selectedClaudeCode: URL? { didSet { if selectedClaudeCode != oldValue { selectedRequest = nil } } }
     private var completions = CompletionIndicator()
     private func indicator(_ item:DesktopSession, source:AppProfile, now:Double) -> DesktopSession {
+        device?.observeSession(source.rawValue+"/"+item.url.absoluteString,item.light,revision:item.completionRevision)
         var result = item
         result.updated = activity.observe(id:source.rawValue+"/"+item.url.absoluteString, light:item.light, revision:item.completionRevision, initialTime:item.updated, workTime:source == .codex || source == .t3 ? item.updated : nil, now:now)
         result.light = completions.display(item.light, id:item.url.absoluteString, revision:item.completionRevision)
@@ -663,7 +664,8 @@ import MicroCore
                 let cmuxFront = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == AppProfile.cmux.bundleIDs.first
                 let observed=Date().timeIntervalSince1970
                 let observations: [(CmuxTarget,SessionLight,Double)] = zip(live,states).map { row,state in
-                    (row,state,activity.observe(id:"cmux/"+row.id.uuidString,light:state,now:observed))
+                    device?.observeSession("cmux/"+row.workspace.uuidString,state)
+                    return (row,state,activity.observe(id:"cmux/"+row.id.uuidString,light:state,now:observed))
                 }
                 let ranked = observations.sorted { a,b in a.2 == b.2 ? a.0.id.uuidString < b.0.id.uuidString : a.2 > b.2 }
                 rows = (0..<6).map { ranked.indices.contains($0) ? ranked[$0].0 : nil }

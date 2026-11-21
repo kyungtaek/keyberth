@@ -30,6 +30,13 @@ int main() {
         assert(response=="AMACK\t"+std::to_string(seq));
     };
     command("AMMODE","generic"); command("AMKEYMODE","sessions");
+    unsigned alerts=0;
+    device.alert=[&]{++alerts;};
+    device.input("K01",true); device.input("K01",false);
+    assert(alerts==0);
+    command("KBALERT","attention"); command("KBALERT","done");
+    write("KBALERT\t"+token+"\t"+std::to_string(seq)+"\tdone");
+    assert(alerts==2);
     command("AMFRAME","012341"); command("AMSELECT","3");
     assert(device.lights.agents[2].rgb==0x268aff && device.lights.selected==3);
     for(unsigned key=1;key<=13;++key) command("KBLED",std::to_string(key)+":123456:1:50:50");
@@ -51,7 +58,7 @@ int main() {
     write("KBLED\t"+token+"\t"+std::to_string(seq+1)+"\t14:123456:1:50:50");
     assert(response.rfind("MKERR",0)==0 && device.lights.functions[6].rgb==0xff00);
     device.input("K13",true); assert(response.find("\"pressed\":true")!=std::string::npos);
-    device.input("K13",false); assert(response.find("\"seq\":2")!=std::string::npos);
+    device.input("K13",false); assert(response.find("\"seq\":4")!=std::string::npos);
     device.tick(true,4100); assert(!device.controls() && device.lights.functions[6].rgb==0);
     std::cout<<"PASS report 7 handshake, input, all 13 keys, ambient, validation and timeout\n";
 }

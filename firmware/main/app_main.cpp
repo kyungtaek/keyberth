@@ -34,6 +34,7 @@ QueueHandle_t rx_queue=nullptr,tx_queue=nullptr;
 std::atomic<unsigned> rx_dropped{0},tx_failed{0};
 char base_mac[18];
 uint32_t bootId;
+unsigned sessionBeeps=0;
 esp_err_t board_error=ESP_ERR_INVALID_STATE;
 bool receive(aim::Link link,const uint8_t* b,size_t n) {
     if(n!=63 && n!=19)return false;
@@ -88,6 +89,7 @@ std::string status() {
     cJSON_AddBoolToObject(j,"ble_slot_bound",aim::ble_bonds()>0);
     cJSON_AddNumberToObject(j,"wake_count",wakeCount);
     cJSON_AddNumberToObject(j,"boot_id",bootId);
+    cJSON_AddNumberToObject(j,"session_beeps",sessionBeeps);
     cJSON_AddNumberToObject(j,"reset_reason",esp_reset_reason());
     const auto* running=esp_ota_get_running_partition();
     const auto* boot=esp_ota_get_boot_partition();
@@ -118,7 +120,7 @@ void input(aim::InputEvent e) {
             if(now-powerDown>=2000)sleep_board(true);
             else if(now-lastPowerClick<=450) {
                 auto next=kb::prefs;next.buzzer=!next.buzzer;
-                if(kb::save(next))board.tone(2700,90,next.buzzer?next.volume:0);
+                kb::save(next);
                 lastPowerClick=-1000;
             } else lastPowerClick=now;
             powerDown=-1;
@@ -140,7 +142,6 @@ void input(aim::InputEvent e) {
         }
         return;
     }
-    if(e.pressed&&kb::prefs.buzzer)board.tone(2700,35,kb::prefs.volume);
     if(agent.active()) {
         static aim::Direction previous=aim::Direction::Center;
         if(e.kind==aim::InputKind::Key) {
@@ -195,6 +196,10 @@ extern "C" void app_main() {
     }
     bleError=aim::ble_begin(receive);
     ESP_LOGI("keyberth","board=%s",esp_err_to_name(board_error));
+    agent.alert=[] {
+        if(board_error==ESP_OK && kb::prefs.buzzer && kb::prefs.volume &&
+           board.tone(2700,160,kb::prefs.volume)) ++sessionBeeps;
+    };
     protocol.status=status;
     ESP_ERROR_CHECK(xTaskCreate(transmit,"basic_tx",6144,nullptr,3,nullptr)==pdPASS?ESP_OK:ESP_ERR_NO_MEM);
     int64_t last_frame=0,last_status=0;

@@ -12,18 +12,18 @@ function firmwareControls(app, dialog, reconnect) {
     busy = true;
     try {
       const actions = {
-        install: ['키버스 펌웨어 0.4.2 설치','Mac 본체에 USB로 연결하세요. 정품 백업을 검증하고 별도 파티션에 설치합니다.'],
-        update: ['키버스 펌웨어 0.4.2 업데이트','USB 연결을 유지하세요. 기존 키버스 설정과 페어링을 유지합니다.'],
-        reset: ['키버스 기기 공장 초기화','키버스 펌웨어 0.4.2의 조명, 절전, 부저 설정과 Bluetooth 페어링 3개를 지웁니다. Mac의 키맵은 유지됩니다.'],
+        install: ['키버스 펌웨어 0.4.3 설치','Mac 본체에 USB로 연결하세요. 정품 백업을 검증하고 별도 파티션에 설치합니다.'],
+        update: ['키버스 펌웨어 0.4.3 업데이트','USB 연결을 유지하세요. 기존 키버스 설정과 페어링을 유지합니다.'],
+        reset: ['키버스 기기 공장 초기화','키버스 펌웨어 0.4.3의 조명, 절전, 부저 설정과 Bluetooth 페어링 3개를 지웁니다. Mac의 키맵은 유지됩니다.'],
         rollback: ['Universal Agent 0.2.18로 복귀','Universal Agent를 기본 부팅 펌웨어로 변경하고 재시작합니다.']
       };
       const [title,detail] = actions[action];
       const choice = await dialog.showMessageBox({type:action==='reset'?'warning':'question',message:title,
         detail,buttons:['취소',title],defaultId:0,cancelId:0});
       if (choice.response !== 1) return 'cancelled';
-      const {stdout}=await run(path.join(dir,'keyberth-firmware'),[action,path.join(dir,'keyberth-0.4.2.bin')]);
+      const {stdout}=await run(path.join(dir,'keyberth-firmware'),[action,path.join(dir,'keyberth-0.4.3.bin')]);
       if (stdout.trim()==='already-current') {
-        await dialog.showMessageBox({message:'키버스 펌웨어 0.4.2가 이미 설치되어 있습니다.',buttons:['확인']});
+        await dialog.showMessageBox({message:'키버스 펌웨어 0.4.3가 이미 설치되어 있습니다.',buttons:['확인']});
         return 'current';
       }
       await reconnect();
@@ -37,7 +37,7 @@ function firmwareControls(app, dialog, reconnect) {
     } finally { busy=false; }
   }
   return {manage, menu:{label:'기기 펌웨어',submenu:[
-    {label:'키버스-펌웨어 0.4.2 설치…',click:()=>manage('install')},
+    {label:'키버스-펌웨어 0.4.3 설치…',click:()=>manage('install')},
     {label:'키버스 펌웨어 업데이트…',click:()=>manage('update')},
     {label:'기기 공장 초기화…',click:()=>manage('reset')},
     {label:'정품 Universal Agent로 롤백…',click:()=>manage('rollback')}

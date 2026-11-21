@@ -12,6 +12,7 @@ public:
     bool controls() const { return active() && generic && sessionKeys; }
     void tick(bool connected, int64_t now);
     void input(const std::string& id, bool pressed);
+    std::function<void()> alert;
     Lights lights{};
 private:
     Output send;

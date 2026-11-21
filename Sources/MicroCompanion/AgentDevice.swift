@@ -13,8 +13,8 @@ struct CompanionError: LocalizedError {
 enum AgentDevice {
     static let firmware = "0.2.18-ai-micro-agent"
 
-    static let developmentFirmware = "0.4.2-keyberth"
-    static func hasKeyLighting(_ version:String) -> Bool { [developmentFirmware,"0.4.1-keyberth","0.4.0-keyberth","0.3.0-keyberth","0.2.0-keyberth","0.1.0-keyberth-dev"].contains(version) }
+    static let developmentFirmware = "0.4.3-keyberth"
+    static func hasKeyLighting(_ version:String) -> Bool { [developmentFirmware,"0.4.2-keyberth","0.4.1-keyberth","0.4.0-keyberth","0.3.0-keyberth","0.2.0-keyberth","0.1.0-keyberth-dev"].contains(version) }
 
     // Walk up from the callout node to its USB device. The location also ties
     // the CDC version reply to the HID collection used for input and lights.
@@ -121,6 +121,15 @@ final class AgentHID {
     private var decoder = UniversalAgent.Decoder()
     private var timer: Timer?
     private var seq = 0, inputSeq = 0
+    private var alerts = SessionAlerts()
+    private var supportsAlerts = false
+    private var nextAlert: String?
+    func observeSession(_ id:String, _ state:SessionLight, revision:String? = nil) {
+        guard stage == 3, supportsAlerts, !stopped else { return }
+        if let alert = alerts.observe(id:id,state:state,revision:revision,now:now), nextAlert != "attention" {
+            nextAlert = alert
+        }
+    }
     private var stage = 0
     private var pending: (name: String, value: String?, deadline: TimeInterval)?
     private let location: Int?
@@ -225,7 +234,8 @@ final class AgentHID {
             case 1: try command("AMMODE", "generic")
             case 2: try command("AMKEYMODE", "sessions")
             default:
-                if let frame, frame != sentFrame { try command("AMFRAME", frame) }
+                if let nextAlert { self.nextAlert = nil; try command("KBALERT",nextAlert) }
+                else if let frame, frame != sentFrame { try command("AMFRAME", frame) }
                 else if let selected, selected != sentSelected { try command("AMSELECT", selected) }
                 else {
                     if supportsKeyLighting, let desired = wantedLighting {
@@ -250,11 +260,12 @@ final class AgentHID {
                   let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
                   obj["session"] as? String == session else { return }
             guard let reportedVersion = obj["version"] as? String,
-                  reportedVersion == expectedVersion || (location == nil && ["0.4.1-keyberth","0.4.0-keyberth","0.3.0-keyberth"].contains(reportedVersion)), obj["protocol"] as? String == "ai-micro-agent-v1",
+                  reportedVersion == expectedVersion || (location == nil && ["0.4.2-keyberth","0.4.1-keyberth","0.4.0-keyberth","0.3.0-keyberth"].contains(reportedVersion)), obj["protocol"] as? String == "ai-micro-agent-v1",
                   obj["hardware"] as? String == "AI Micro", obj["slots"] as? Int == 6,
                   let caps = obj["capabilities"] as? [String], ["input-events","slot-states","selected-slot"].allSatisfy(caps.contains),
                   !supportsKeyLighting || caps.contains("keyberth-light-v1")
             else { fail("지원 대상과 다른 Universal Agent 펌웨어"); return }
+            supportsAlerts = caps.contains("session-alert-v1")
             expectedVersion = reportedVersion
             pending = nil
             stage = 1
