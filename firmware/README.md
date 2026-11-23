@@ -1,6 +1,6 @@
 # 키버스-펌웨어
 
-AI Micro ESP32-S3용 개발 버전은 `0.4.3-keyberth`다. 펌웨어 버전은 앱과 독립적으로 `VERSION`에서 관리한다. 제조사가 MIT로 공개한 AI Micro Basic 0.1.0에서 보드 드라이버, HID/CDC와 ROM 복구 경로를 가져왔다. 원본 소스 ZIP의 SHA-256은 `fe5c2d523e76d482c63703adec0264ea1f6a7143add33bd7a3f2ad49854d825b`다. Universal Agent 0.2.18의 USB 동작을 호환 기준으로 삼았다. [제조사 소스 배포본](https://micro.diyshare.cn/downloads/ai-micro-basic/0.1.0/ai-micro-basic-0.1.0-source.zip) · [라이선스](LICENSE)
+AI Micro ESP32-S3용 개발 버전은 `0.4.4-keyberth`다. 펌웨어 버전은 앱과 독립적으로 `VERSION`에서 관리한다. 제조사가 MIT로 공개한 AI Micro Basic 0.1.0에서 보드 드라이버, HID/CDC와 ROM 복구 경로를 가져왔다. 원본 소스 ZIP의 SHA-256은 `fe5c2d523e76d482c63703adec0264ea1f6a7143add33bd7a3f2ad49854d825b`다. Universal Agent 0.2.18의 USB 동작을 호환 기준으로 삼았다. [제조사 소스 배포본](https://micro.diyshare.cn/downloads/ai-micro-basic/0.1.0/ai-micro-basic-0.1.0-source.zip) · [라이선스](LICENSE)
 
 ## 빌드와 연결
 
@@ -24,7 +24,7 @@ Mac의 Bluetooth 설정에서 **AI Micro**를 선택해 처음 한 번 페어링
 
 배터리에서 자동 절전에 들어간 뒤 노브 또는 전원 버튼을 짧게 누르면 깨어난다. 자동 절전 시간을 0분으로 지정하면 자동 절전이 꺼진다. 기기 설정의 부저 볼륨은 0~100%이며 전원 버튼을 빠르게 두 번 눌러 음소거를 전환한다.
 
-0.4.3 설치 관리자는 정품 파티션 표를 검증한 뒤 두 OTA 슬롯을 검사한다. 기존 제조사 이미지가 있는 슬롯은 보존하고, 비어 있거나 알려진 키버스 이미지가 있는 슬롯을 선택한다. 두 슬롯 모두 다른 데이터가 있으면 쓰기 전에 중단한다.
+0.4.4 설치 관리자는 정품 파티션 표를 검증한 뒤 두 OTA 슬롯을 검사한다. 기존 제조사 이미지가 있는 슬롯은 보존하고, 비어 있거나 알려진 키버스 이미지가 있는 슬롯을 선택한다. 두 슬롯 모두 다른 데이터가 있으면 쓰기 전에 중단한다.
 
 ## 기기 조명 설정 (0.4.0 이상)
 

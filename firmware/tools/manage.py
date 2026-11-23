@@ -19,11 +19,12 @@ from serial.tools.list_ports import comports
 from verify_backup import STOCK, verify
 
 ROOT = Path.home() / "Library/Application Support/Keyberth/Recovery"
-VERSION = "0.4.3-keyberth"
+VERSION = "0.4.4-keyberth"
 PREVIOUS_VERSION = "0.2.0-keyberth"
 STOCK_VERSION = "0.2.18-ai-micro-agent"
-IMAGE_HASH = "d0fffcb4609b1999e20183bb4d1c216877b0ef8ccade1a5f14be307fa003bdee"
+IMAGE_HASH = "29b37f09f997c80388139046a96a1f86a860db1b8b8e83d9ca27bd55ee4115a9"
 PREVIOUS_IMAGES = (
+    (671744, "d0fffcb4609b1999e20183bb4d1c216877b0ef8ccade1a5f14be307fa003bdee"),
     (671152, "056332209bec88e5bff2ea073b7db43c26d77bc7d68bc91624b219e29e5ef73a"),
     (670352, "0c46e683c6ae8c1383b630cbc87964a48b6ab01e2d2574f46f7e9db09b137ee3"),
     (670352, "8f144506356a3e624c95005d5e29028ef58d8e48f4e10834cdec08e89651ca5f"),
@@ -86,9 +87,19 @@ def wait_for(check, seconds):
                 raise
             time.sleep(.3)
 
+def stage(name, **details):
+    journal=os.getenv("KEYBERTH_FIRMWARE_JOURNAL")
+    if journal:
+        with open(journal,"a",encoding="utf-8") as stream:
+            stream.write(json.dumps(dict(time=time.time(),stage=name,**details),ensure_ascii=False)+"\n")
+
 def run(action, image):
+    stage("이미지 확인", target=VERSION, sha256=hashlib.sha256(image.read_bytes()).hexdigest())
+    require(hashlib.sha256(image.read_bytes()).hexdigest()==IMAGE_HASH,"이미지 체크섬 불일치")
+    stage("일반 USB 탐색")
     port=usb(0x8360)
     initial=status(port)
+    stage("USB 상태 수신", firmware=str(initial.get("firmware",""))[:50])
     location=port.location
     mac=initial["base_mac"].lower()
     require(location and re.fullmatch(r"(?:[a-f0-9]{2}:){5}[a-f0-9]{2}",mac) and initial.get("hardware_revision")=="AI Micro","기기 식별 실패")
@@ -110,6 +121,9 @@ def run(action, image):
         if version==VERSION:
             require(result.get("running_partition") in ("ota_0","ota_1") and result["running_partition"]==result.get("boot_partition"),"기본 부팅 파티션 불일치")
         return result
+    if action=="diagnose":
+        check(initial["firmware"])
+        return initial["firmware"]
     if action in ("install","update") and initial.get("firmware")==VERSION:
         require(hashlib.sha256(image.read_bytes()).hexdigest()==IMAGE_HASH,"이미지 체크섬 불일치")
         check(VERSION)
@@ -118,7 +132,7 @@ def run(action, image):
         require(initial.get("firmware")==STOCK_VERSION,"기존 키버스 펌웨어가 설치되어 있습니다. 업데이트를 선택하세요.")
     if action=="reset":
         reset_version=initial.get("firmware")
-        require(reset_version in ("0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth",VERSION),"공장 초기화는 키버스 펌웨어 0.4.0 이상에서 지원합니다.")
+        require(reset_version in ("0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth","0.4.3-keyberth",VERSION),"공장 초기화는 키버스 펌웨어 0.4.0 이상에서 지원합니다.")
         check(reset_version)
         with serial.Serial(port.device,115200,timeout=1) as link:
             link.write(b"KEYBERTH FACTORY_RESET CONFIRM\n")
@@ -135,12 +149,12 @@ def run(action, image):
         wait_for(defaults,25)
         return reset_version
     if action=="update":
-        require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth",VERSION),"키버스 펌웨어에서 업데이트할 수 있습니다.")
+        require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth","0.4.3-keyberth",VERSION),"키버스 펌웨어에서 업데이트할 수 있습니다.")
         require(hashlib.sha256(image.read_bytes()).hexdigest()==IMAGE_HASH,"이미지 체크섬 불일치")
         check(initial["firmware"])
     if action=="rollback":
         if initial.get("firmware")!=STOCK_VERSION:
-            require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth",VERSION),"지원하는 키버스-펌웨어만 롤백할 수 있습니다.")
+            require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth","0.4.3-keyberth",VERSION),"지원하는 키버스-펌웨어만 롤백할 수 있습니다.")
             check(initial["firmware"])
             with serial.Serial(port.device,115200,timeout=1) as link:
                 link.write(b"KEYBERTH ROLLBACK\n");link.flush()
@@ -171,12 +185,15 @@ def run(action, image):
     def reboot():
         require(mac in rom("read_mac",stub=False).lower(),"ROM 기기가 변경됐습니다.")
         rom("read_mac",stub=False,reset=True)
+    stage("ROM 전환")
     try:
         with serial.Serial(port.device,1200,timeout=.5):
             time.sleep(.15)
     except serial.SerialException:
         pass
+    stage("ROM 재탐색")
     wait_for(lambda:usb(0x1001,location),18)
+    stage("ROM 기기 일치 확인")
     require(mac in rom("read_mac",stub=False).lower(),"ROM 기기 식별 실패")
     slot_touched=False
     selector_touched=False
@@ -184,6 +201,7 @@ def run(action, image):
     try:
         security=rom("get_security_info",stub=False)
         require("Secure Boot: Disabled" in security and "Flash Encryption: Disabled" in security and "Detected flash size: 16MB" in rom("flash_id",stub=False),"플래시 보안 상태 또는 용량 불일치")
+        stage("복구 백업 확인")
         backup=None
         for identity in ROOT.glob("*/identity.json"):
             if json.loads(identity.read_text()).get("mac","").lower()!=mac:
@@ -199,6 +217,7 @@ def run(action, image):
             verify(first,second)
             (work/"identity.json").write_text(json.dumps({"mac":mac}))
             backup=first
+        stage("정품 영역 검증")
         for start,length,digest in STOCK:
             data=read(start,length,work/f"region-{start:x}.bin")
             require(hashlib.sha256(data).hexdigest()==digest,"정품 구성 요소 불일치")
@@ -218,6 +237,7 @@ def run(action, image):
         length=((max(len(content),OLD_LENGTH)+4095)//4096)*4096
         pad=lambda n: bytes([255])*n
         current=content+pad(length-len(content))
+        stage("대상 슬롯 검사")
         candidates=sorted(enumerate(OTA_SLOTS,1), key=lambda item:current_slot==f"ota_{item[0]-1}")
         for sequence,address in candidates:
             # Only overwrite a blank slot or a complete known Keyberth image.
@@ -237,13 +257,17 @@ def run(action, image):
             saved_prefix=work/"slot-original.bin"
             saved_prefix.write_bytes(prefix)
             slot_touched=True
+            stage("이미지 쓰기")
             rom("write_flash",hex(address),slot_image)
+            stage("이미지 재읽기")
             require(read(address,length,work/"slot-after.bin")==current,"OTA 이미지 재읽기 실패")
         selector=selection(sequence)
         path=work/"trial-selection.bin";path.write_bytes(selector)
+        stage("부팅 슬롯 지정")
         if selected!=selector+pad(4096):
             selector_touched=True
             rom("write_flash",hex(SELECT),path)
+        stage("부팅 슬롯 검증")
         require(read(SELECT,8192,work/"selected.bin")==selector+pad(4096),"부팅 선택 검증 실패")
     except BaseException:
         if slot_touched or selector_touched:
@@ -256,8 +280,10 @@ def run(action, image):
             require(read(SELECT,8192,work/"restored.bin")==original.read_bytes(),"원본 부팅 선택 복원 실패")
         reboot()
         raise
+    stage("정상 모드 재부팅")
     reboot()
     try:
+        stage("재부팅 후 펌웨어 확인")
         running=wait_for(lambda:check(VERSION,after_reboot=True),25)
     except (RuntimeError,OSError,ValueError) as error:
         raise RuntimeError("이미지는 검증됐지만 시험 부팅을 확인할 수 없습니다. Mac 본체에 직접 연결한 뒤 기기 버전을 확인하세요.") from error
@@ -276,6 +302,7 @@ def run(action, image):
         reply=query(target,b"PREFS_SET\t"+json.dumps(fields).encode(),b"CMPREFS")
         require(reply.get("ok") and reply.get("id")==922 and all(reply.get(k)==fields[k] for k in keys),"설정 이전 실패")
 
+    stage("설정 저장소 확인")
     saved=query(target,b'PREFS_GET\t{"id":923}',b"CMPREFS")
     require(saved.get("ok") and saved.get("id")==923 and saved.get("version")==1
             and saved.get("storageReady") is True,"설치 후 설정 저장소 응답 확인 실패")
@@ -285,7 +312,7 @@ def run(action, image):
 
 if __name__=="__main__":
     parser=argparse.ArgumentParser()
-    parser.add_argument("action",choices=["install","update","reset","rollback"])
+    parser.add_argument("action",choices=["install","update","reset","rollback","diagnose"])
     parser.add_argument("image",type=Path)
     args=parser.parse_args()
     os.umask(0o077)

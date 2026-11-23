@@ -184,3 +184,8 @@ main {display:grid;grid-template-columns:minmax(315px,.85fr) minmax(470px,1.4fr)
 #firmwareWait h2 { margin:0 0 18px; font-size:21px; }
 #firmwareWait progress { display:block; width:100%; height:6px; accent-color:#ddd; }
 #firmwareWait p { margin:16px 0 0; color:#ccc; font-size:14px; }
+
+#firmwareHistory { margin:16px 0; }
+#firmwareHistory summary { cursor:pointer; padding:8px 0; }
+#firmwareRecord { max-width:100%; }
+#firmwareReport { max-height:220px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }

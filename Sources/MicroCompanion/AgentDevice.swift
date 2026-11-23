@@ -13,8 +13,8 @@ struct CompanionError: LocalizedError {
 enum AgentDevice {
     static let firmware = "0.2.18-ai-micro-agent"
 
-    static let developmentFirmware = "0.4.3-keyberth"
-    static func hasKeyLighting(_ version:String) -> Bool { [developmentFirmware,"0.4.2-keyberth","0.4.1-keyberth","0.4.0-keyberth","0.3.0-keyberth","0.2.0-keyberth","0.1.0-keyberth-dev"].contains(version) }
+    static let developmentFirmware = "0.4.4-keyberth"
+    static func hasKeyLighting(_ version:String) -> Bool { [developmentFirmware,"0.4.3-keyberth","0.4.2-keyberth","0.4.1-keyberth","0.4.0-keyberth","0.3.0-keyberth","0.2.0-keyberth","0.1.0-keyberth-dev"].contains(version) }
 
     // Walk up from the callout node to its USB device. The location also ties
     // the CDC version reply to the HID collection used for input and lights.
@@ -130,6 +130,7 @@ final class AgentHID {
             nextAlert = alert
         }
     }
+    private let ready: () -> Void
     private var stage = 0
     private var pending: (name: String, value: String?, deadline: TimeInterval)?
     private let location: Int?
@@ -166,7 +167,8 @@ final class AgentHID {
     private(set) var stopped = false
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
-    init(location: Int?, expectedVersion: String = AgentDevice.firmware, status: @escaping (String) -> Void, release: @escaping (DeckInput) -> Void = { _ in }, press: @escaping (DeckInput) -> Void) throws {
+    init(location: Int?, expectedVersion: String = AgentDevice.firmware, status: @escaping (String) -> Void, ready: @escaping () -> Void = {}, release: @escaping (DeckInput) -> Void = { _ in }, press: @escaping (DeckInput) -> Void) throws {
+        self.ready = ready
         self.expectedVersion = expectedVersion
         self.location = location
         self.status = status
@@ -260,7 +262,7 @@ final class AgentHID {
                   let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
                   obj["session"] as? String == session else { return }
             guard let reportedVersion = obj["version"] as? String,
-                  reportedVersion == expectedVersion || (location == nil && ["0.4.2-keyberth","0.4.1-keyberth","0.4.0-keyberth","0.3.0-keyberth"].contains(reportedVersion)), obj["protocol"] as? String == "ai-micro-agent-v1",
+                  reportedVersion == expectedVersion || (location == nil && ["0.4.3-keyberth","0.4.2-keyberth","0.4.1-keyberth","0.4.0-keyberth","0.3.0-keyberth"].contains(reportedVersion)), obj["protocol"] as? String == "ai-micro-agent-v1",
                   obj["hardware"] as? String == "AI Micro", obj["slots"] as? Int == 6,
                   let caps = obj["capabilities"] as? [String], ["input-events","slot-states","selected-slot"].allSatisfy(caps.contains),
                   !supportsKeyLighting || caps.contains("keyberth-light-v1")
@@ -274,7 +276,7 @@ final class AgentHID {
             pending = nil
             switch request.name {
             case "AMMODE": stage = 2
-            case "AMKEYMODE": stage = 3; status((location == nil ? "Bluetooth" : "USB") + " 연결됨 · " + expectedVersion)
+            case "AMKEYMODE": stage = 3; status((location == nil ? "Bluetooth" : "USB") + " 연결됨 · " + expectedVersion); ready()
             case "KBLED":
                 if let value = request.value, let target = value.split(separator:":").first {
                     appliedStyles = appliedStyles.filter { $0.split(separator:":").first != target }

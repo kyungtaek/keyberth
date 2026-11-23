@@ -2,7 +2,16 @@ import AppKit
 import MicroCore
 
 enum MacActions {
+    static let targets: [String:(profile:AppProfile, mic:Bool)] = [
+        "target.codex.mic":(.codex,true), "target.t3.mic":(.t3,true), "target.claude.mic":(.claude,true),
+        "target.codex.new":(.codex,false), "target.t3.new":(.t3,false), "target.claude.new":(.claude,false),
+        "target.cmux.new":(.cmux,false)
+    ]
+    static let targetLabels = targets.mapValues { target in
+        target.profile.title + " · " + (target.mic ? "누르고 받아쓰기" : target.profile == .cmux ? "새 워크스페이스" : "새 대화")
+    }
     static let system = [
+        "system.screenshot":"스크린샷 · 영역 선택", "system.sleep":"Mac 잠자기",
         "system.missionControl":"미션 컨트롤", "system.volumeUp":"볼륨 올리기",
         "system.volumeDown":"볼륨 내리기", "system.mute":"음소거 전환",
         "system.fullScreen":"전체 화면 전환", "system.maximize":"창 최대화",
@@ -40,6 +49,26 @@ enum MacActions {
         _ = try await NSWorkspace.shared.openApplication(at:url,configuration:config)
     }
     @MainActor static func perform(_ action:String) throws {
+        if action == "system.sleep" {
+            _ = try CmuxClient.run(["sleepnow"],executable:"/usr/bin/pmset")
+            return
+        }
+        if action == "system.screenshot" {
+            guard CGPreflightPostEventAccess() else { throw CompanionError("손쉬운 사용 권한이 필요합니다.") }
+            let hotkeys = UserDefaults.standard.persistentDomain(forName:"com.apple.symbolichotkeys")?["AppleSymbolicHotKeys"] as? [String:Any]
+            let shortcut = hotkeys?["30"] as? [String:Any]
+            guard shortcut?["enabled"] as? Bool != false else { throw CompanionError("macOS 키보드 설정에서 영역 스크린샷 단축키를 켜세요.") }
+            let parameters = (shortcut?["value"] as? [String:Any])?["parameters"] as? [Int]
+            let values = parameters ?? [52,21,Int(CGEventFlags([.maskCommand,.maskShift]).rawValue)]
+            guard values.count == 3, let code = UInt16(exactly:values[1]), code < 128, values[2] >= 0,
+                  let down=CGEvent(keyboardEventSource:nil,virtualKey:code,keyDown:true),
+                  let up=CGEvent(keyboardEventSource:nil,virtualKey:code,keyDown:false) else { throw CompanionError("스크린샷 단축키를 확인하세요.") }
+            down.flags=CGEventFlags(rawValue:UInt64(values[2]))
+            up.flags=down.flags
+            down.post(tap:.cghidEventTap)
+            up.post(tap:.cghidEventTap)
+            return
+        }
         if action == "system.missionControl" {
             guard NSWorkspace.shared.open(URL(fileURLWithPath:"/System/Applications/Mission Control.app")) else { throw CompanionError("미션 컨트롤을 열 수 없습니다.") }
             return

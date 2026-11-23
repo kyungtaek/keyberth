@@ -4,6 +4,15 @@ import MicroCore
 @testable import MicroCompanion
 
 final class CodexTurnTests: XCTestCase {
+    func testFirstObservedNewCompletionStaysGreenUntilViewed() {
+        var indicator = CompletionIndicator()
+        XCTAssertEqual(indicator.display(.done,id:"old",revision:"a"), .ready)
+        XCTAssertEqual(indicator.display(.done,id:"fresh",revision:"b",newlyCompleted:true), .done)
+        XCTAssertEqual(indicator.display(.done,id:"fresh",revision:"b"), .done)
+        indicator.markViewed("fresh")
+        XCTAssertEqual(indicator.display(.done,id:"fresh",revision:"b",newlyCompleted:true), .ready)
+    }
+
     func testNewestTurnControlsEachSlotAcrossPolls() throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let directory = home.appendingPathComponent(".codex")

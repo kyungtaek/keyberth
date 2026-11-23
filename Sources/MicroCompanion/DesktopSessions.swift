@@ -32,7 +32,7 @@ enum DesktopSessions {
         let db = home.appendingPathComponent(codex ? ".codex/state_5.sqlite" : ".t3/userdata/statev2.sqlite")
         let pending = "EXISTS (SELECT 1 FROM orchestration_v2_projection_runtime_requests q WHERE q.thread_id=t.thread_id AND q.status='pending')"
         let settled = "(coalesce(json_extract(t.payload_json,'$.settledOverride'),'')='settled' OR json_extract(t.payload_json,'$.settledAt') IS NOT NULL)"
-        let scope = pendingT3Only ? "AND NOT "+settled+" AND "+pending : ""
+        let scope = "AND NOT "+settled+(pendingT3Only ? " AND "+pending : "")
         let limit = pendingT3Only ? "" : "LIMIT 6"
         let history = home.appendingPathComponent(".codex/thread_history_1.sqlite")
         let created = "coalesce(created_at_ms/1000.0,created_at)"

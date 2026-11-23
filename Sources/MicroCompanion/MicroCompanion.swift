@@ -48,6 +48,7 @@ import MicroCore
     private var profileList:[[String:String]] { enabled.map { ["id":$0.rawValue,"name":title($0)] } }
     private func storeEnabled() { KeyMap.preferences.set(enabled.map(\.rawValue),forKey:"enabledAppProfiles") }
     private var automatic = (KeyMap.preferences.object(forKey:"automaticKeyMap") as? Bool) ?? true
+    private var wakeObserver: NSObjectProtocol?
     private var focusObserver: NSObjectProtocol?
     var feedback = ""
 
@@ -60,7 +61,7 @@ import MicroCore
     }
     private func activate(_ next: AppProfile, notify: Bool = true) {
         guard next != profile else { return }
-        finishMic()
+        if micProfile != next { finishMic() }
         selectedClaudeCode = nil
         visibleDesktop = nil
         if profile == .claudeCode { ClaudeCodeHook.endLease() }
@@ -81,7 +82,7 @@ import MicroCore
                 let old = binding(key,in:previous)
                 guard value != old || next.agentActions[value] != previous.agentActions[old] ||
                     (recentIndex(value) != nil && previous != next) else { return nil }
-                let label = next.agentActions[value] ?? MacActions.system[value] ?? ApplicationMenu.path(value)?.last ??
+                let label = next.agentActions[value] ?? MacActions.targetLabels[value] ?? MacActions.system[value] ?? ApplicationMenu.path(value)?.last ??
                     MacActions.appID(value).map { MacActions.favorites[$0] ?? $0 } ?? (value == "none" ? "미할당" : KeyMap.label(value))
                 let name = commonIndex(value).map { "통합 최근 세션 "+String($0+1) } ?? ObsidianNote.path(value).map { URL(fileURLWithPath:$0).deletingPathExtension().lastPathComponent } ?? label
                 return ["key":key,"name":name]
@@ -134,6 +135,7 @@ import MicroCore
     private var codexDictation: CodexControls.Dictation?
     private var codexPickerTask: Task<Void,Never>?
     private var codexForkPending = false
+    private var targetPresses = [String:UUID]()
     private var micKeys = Set<String>()
     private func finishMic() {
         cmuxSpace.cancel()
@@ -155,22 +157,36 @@ import MicroCore
         } catch { feedback = error.localizedDescription; hud(feedback) }
     }
     private func release(_ physical: DeckInput) {
+        targetPresses.removeValue(forKey:KeyMap.code(physical))
         cmuxSpace.release(KeyMap.code(physical))
         guard micKeys.remove(KeyMap.code(physical)) != nil, micKeys.isEmpty else { return }
         finishMic()
     }
     private var selectedClaudeCode: URL? { didSet { if selectedClaudeCode != oldValue { selectedRequest = nil } } }
+    private var t3HighWater = KeyMap.preferences.double(forKey:"t3CompletionWatermark")
     private var completions = CompletionIndicator()
     private func indicator(_ item:DesktopSession, source:AppProfile, now:Double) -> DesktopSession {
         device?.observeSession(source.rawValue+"/"+item.url.absoluteString,item.light,revision:item.completionRevision)
         var result = item
+        let previous = activity.entries[source.rawValue+"/"+item.url.absoluteString]
+        let newlyCompleted = source == .t3 && item.light == .done && (
+            (previous == nil && t3HighWater > 0 && item.updated > t3HighWater) ||
+            (previous != nil && (previous?.state == SessionLight.running.rawValue ||
+             previous?.state == SessionLight.attention.rawValue || (previous?.revision != nil && previous?.revision != item.completionRevision))))
         result.updated = activity.observe(id:source.rawValue+"/"+item.url.absoluteString, light:item.light, revision:item.completionRevision, initialTime:item.updated, workTime:source == .codex || source == .t3 ? item.updated : nil, now:now)
-        result.light = completions.display(item.light, id:item.url.absoluteString, revision:item.completionRevision)
+        result.light = completions.display(item.light, id:item.url.absoluteString, revision:item.completionRevision, newlyCompleted:newlyCompleted)
         return result
     }
     private func rankedSessions(_ items:[DesktopSession],source:AppProfile) -> [DesktopSession] {
         let now = Date().timeIntervalSince1970
         let observed = items.map { indicator($0,source:source,now:now) }
+        if source == .t3 {
+            let watermark = max(t3HighWater,items.map(\.updated).max() ?? 0)
+            if watermark > t3HighWater || t3HighWater == 0 {
+                t3HighWater = watermark > 0 ? watermark : now
+                KeyMap.preferences.set(t3HighWater,forKey:"t3CompletionWatermark")
+            }
+        }
         return observed.sorted { a,b in
             a.updated == b.updated ? a.url.absoluteString < b.url.absoluteString : a.updated > b.updated
         }
@@ -412,6 +428,40 @@ import MicroCore
             return
         }
         if binding == "none" { return }
+        if let target = MacActions.targets[binding], let bundle = target.profile.bundleIDs.first {
+            let token = UUID()
+            if target.mic { targetPresses[code] = token }
+            Task {
+                defer { if targetPresses[code] == token { targetPresses.removeValue(forKey:code) } }
+                do {
+                    try await MacActions.launch(bundle)
+                    let deadline = ProcessInfo.processInfo.systemUptime + 5
+                    while true {
+                        if target.mic && targetPresses[code] != token { return }
+                        if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundle,
+                           let app=NSRunningApplication.runningApplications(withBundleIdentifier:bundle).first,
+                           AppNode(element:AXUIElementCreateApplication(app.processIdentifier)).node("AXFocusedWindow") != nil { break }
+                        guard ProcessInfo.processInfo.systemUptime < deadline else { throw CompanionError("대상 앱의 창을 열 수 없습니다.") }
+                        try await Task.sleep(nanoseconds:50_000_000)
+                    }
+                    if target.mic {
+                        guard micProfile == nil else { return }
+                        switch target.profile {
+                        case .t3: t3Dictation = try T3Controls.startDictation()
+                        case .codex: codexDictation = try CodexControls.startDictation()
+                        default: try AssistantControls.perform("agent.mic",in:target.profile)
+                        }
+                        micProfile = target.profile
+                        micKeys.insert(code)
+                    } else if target.profile == .cmux {
+                        _ = try CmuxClient.run(["new-workspace","--focus","true"])
+                    } else if target.profile == .t3 {
+                        try await T3Controls.perform("agent.newChat",stillActive:{ NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundle })
+                    } else { try AssistantControls.perform("agent.newChat",in:target.profile) }
+                } catch { hud(error.localizedDescription) }
+            }
+            return
+        }
         if let id = MacActions.appID(binding) {
             Task {
                 do { try await MacActions.launch(id); feedback = "" }
@@ -507,6 +557,7 @@ import MicroCore
             do {
                 guard sessionGeneration == generation else { return }
                 try await T3Controls.perform(action, stillActive:{ self.sessionGeneration == generation })
+                if action == "agent.settle" { sessionGeneration = UUID(); refreshDesktop(); refreshCombined() }
                 feedback = ""
             } catch { feedback=error.localizedDescription; hud(feedback) }
         }
@@ -592,6 +643,9 @@ import MicroCore
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             MainActor.assumeIsolated { self?.follow(app?.bundleIdentifier) }
         }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didWakeNotification,object:nil,queue:.main) { [weak self] _ in
+            Task { @MainActor in self?.connect() }
+        }
         follow(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, notify:false)
         connect()
         composerTimer = Timer.scheduledTimer(withTimeInterval:0.4,repeats:true) { [weak self] _ in
@@ -608,6 +662,7 @@ import MicroCore
     func stop() {
         if profile == .claudeCode { ClaudeCodeHook.endLease() }
         finishMic()
+        if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver); self.wakeObserver=nil }
         if let focusObserver { NSWorkspace.shared.notificationCenter.removeObserver(focusObserver); self.focusObserver = nil }
         composerTimer?.invalidate()
         composerTimer=nil
@@ -636,6 +691,11 @@ import MicroCore
                 deviceStatus = "Universal Agent 세션 연결 중"
                 device = try AgentHID(location: location, expectedVersion:version, status: { [weak self] message in
                     if self?.epoch == token { self?.deviceStatus = message; if message.contains("다시 연결") { self?.finishMic() } }
+                }, ready: { [weak self] in
+                    guard let self, self.epoch == token else { return }
+                    self.updateLights()
+                    self.refresh()
+                    self.refreshComposer()
                 }, release: { [weak self] input in self?.release(input) }, press: { [weak self] key in
                     guard self?.epoch == token else { return }
                     self?.handle(key)
@@ -835,7 +895,7 @@ import MicroCore
                 result["value"] = MacActions.favorites
             case "catalog":
                 result["value"] = ["profiles": profileList, "templates":AppProfile.allCases.map { ["id":$0.rawValue,"name":$0.title] }, "controls": KeyMap.controls.map { ["id": $0, "name": KeyMap.name($0), "action": KeyMap.label($0)] },
-                                   "presets":Dictionary(uniqueKeysWithValues:AppProfile.allCases.map { ($0.rawValue,KeyMap.preset($0)) }), "appDefaults":Dictionary(uniqueKeysWithValues:AppProfile.allCases.map { p in (p.rawValue,Dictionary(uniqueKeysWithValues:KeyMap.controls.map { ($0,p.defaultBinding($0)) })) }), "agentActions": Dictionary(uniqueKeysWithValues: AppProfile.allCases.map { ($0.rawValue,$0.agentActions) }), "systemActions":MacActions.system, "favorites":MacActions.favorites, "slackActions": zip(SlackAction.inputs,SlackAction.labels).map { ["id":"slack."+$0.0,"name":$0.1] }, "modifiers": FunctionKey.modifiers, "special": FunctionKey.specialKeys] as [String: Any]
+                                   "presets":Dictionary(uniqueKeysWithValues:AppProfile.allCases.map { ($0.rawValue,KeyMap.preset($0)) }), "appDefaults":Dictionary(uniqueKeysWithValues:AppProfile.allCases.map { p in (p.rawValue,Dictionary(uniqueKeysWithValues:KeyMap.controls.map { ($0,p.defaultBinding($0)) })) }), "agentActions": Dictionary(uniqueKeysWithValues: AppProfile.allCases.map { ($0.rawValue,$0.agentActions) }), "targetActions":MacActions.targetLabels,"systemActions":MacActions.system, "favorites":MacActions.favorites, "slackActions": zip(SlackAction.inputs,SlackAction.labels).map { ["id":"slack."+$0.0,"name":$0.1] }, "modifiers": FunctionKey.modifiers, "special": FunctionKey.specialKeys] as [String: Any]
             case "addProfile":
                 let next:AppProfile
                 if let path=r.target, path.hasSuffix(".app"), let id=Bundle(url:URL(fileURLWithPath:path))?.bundleIdentifier {
@@ -912,6 +972,8 @@ import MicroCore
                     throw CompanionError("슬롯이 변경되었습니다. 다시 선택하세요.")
                 }
                 select(index)
+            case "suspendFirmware": stop(); connecting=false; deviceStatus="펌웨어 작업 중"
+            case "resumeFirmware": start()
             case "connect": connect()
             case "readPrefs", "savePrefs":
                 guard !preferencesBusy else { throw CompanionError("기기 설정을 처리 중입니다.") }

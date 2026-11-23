@@ -96,13 +96,13 @@ function makeWindow() {
   win.webContents.on('will-navigate', event => event.preventDefault());
   win.webContents.on('did-finish-load', () => win.webContents.send('firmware-progress',firmwareProgress));
   win.loadFile(page);
-  win.on('close', event => { if (!quitting) { event.preventDefault(); if (!firmwareProgress) win.hide(); } });
+  win.on('close', event => { if (!quitting) { event.preventDefault(); if (!firmwareProgress) { win.hide(); app.dock?.hide(); } } });
   return win;
 }
 function openEditor(view = 'mapping') {
   if (!editor) editor = makeWindow();
   const win = editor;
-  const show = () => { if (!firmwareProgress) win.webContents.send('view', view); win.show(); win.focus(); };
+  const show = () => { if (app.dock && !app.dock.isVisible()) void app.dock.show(); if (!firmwareProgress) win.webContents.send('view', view); win.show(); win.focus(); };
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', show);
   else show();
 }
@@ -114,9 +114,20 @@ function showFirmwareProgress(message) {
   editor?.setProgressBar(message ? 2 : -1);
   for (const item of Menu.getApplicationMenu()?.items || []) item.enabled = !message;
 }
-const firmwareControls=require('./firmware.cjs').firmwareControls(app,dialog,()=>request('connect'),showFirmwareProgress);
+async function resumeFirmwareBridge() {
+  await request('resumeFirmware');
+  const until=Date.now()+18000;
+  while(Date.now()<until) {
+    const state=await request('state');
+    if(state.usb?.includes(' 연결됨 · ')) return;
+    await new Promise(resolve=>setTimeout(resolve,300));
+  }
+  throw new Error('기기 작업 후 앱 브리지 재연결 시간 초과');
+}
+const firmwareControls=require('./firmware.cjs').firmwareControls(app,dialog,resumeFirmwareBridge,showFirmwareProgress,()=>request('suspendFirmware'));
 ipcMain.handle('command', async (event, method, data) => {
   if (fileURLToPath(event.senderFrame.url) !== page) throw new Error('Unknown window');
+  if (method==='firmwareHistory') return firmwareControls.history();
   if (firmwareProgress && !['state','catalog'].includes(method)) throw new Error('펌웨어 작업 중입니다.');
   if (method==='manageFirmware' && editor && event.sender===editor.webContents)
     return firmwareControls.manage(data?.action);

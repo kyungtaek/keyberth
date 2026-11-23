@@ -190,7 +190,7 @@ function buildFunctions(profile,currentMappings={...state?.globalMappings,...ove
     const actions=Object.entries(catalog.agentActions[profile] || {}).sort(([a],[b])=>a.localeCompare(b));
     if(actions.some(([id])=>id.startsWith('recent.'))) groups.push(['최근 세션',actions.filter(([id])=>id.startsWith('recent.'))]);
     if(actions.some(([id])=>id.startsWith('agent.'))) groups.push(['대화 제어',actions.filter(([id])=>id.startsWith('agent.') && !id.startsWith('agent.t3.'))]);
-    if(profile==='t3') groups.push(['T3 명령',actions.filter(([id])=>id.startsWith('agent.t3.'))]);
+    if(profile==='t3') groups.push(['T3 명령',actions.filter(([id])=>id.startsWith('agent.t3.') || id==='agent.settle')]);
     if(profile==='slack') groups.push(['Slack', catalog.slackActions.map(x=>[x.id,x.name])]);
     if(profile==='obsidian') groups.push(['Obsidian', [['cmd+o','빠른 전환'],['cmd+p','명령 팔레트'],['cmd+n','새 노트']]]);
     groups.push(['편집 · 이동', desktopFunctions.filter(([id])=>id!=='cmd+d'||profile==='claude')], ['기타',[['none','미할당']]]);
@@ -207,7 +207,7 @@ function buildFunctions(profile,currentMappings={...state?.globalMappings,...ove
     byMenu.get(top).push([id,rest.join(' › ')]);
   }
   for(const [top,actions] of byMenu) groups.push(['앱 메뉴 · '+top,actions]);
-  groups.push(['앱 전환',Object.entries(catalog.favorites).map(([id,name])=>['launch.'+id,name+' 열기'])],
+  groups.push(['대상 앱 지정',Object.entries(catalog.targetActions || {})], ['앱 전환',Object.entries(catalog.favorites).map(([id,name])=>['launch.'+id,name+' 열기'])],
               ['시스템 동작',Object.entries(catalog.systemActions)]);
   const known=new Set(groups.flatMap(([,entries])=>entries.map(([id])=>id)));
   const missing=[...new Set(Object.values(currentMappings))].filter(id=>storedActionLabel(id) && !known.has(id));
@@ -374,7 +374,7 @@ function renderState(next) {
   $('usb').title=next.usb;$('cmux').title=next.cmux;
   $('connect').disabled=next.busy;
   $('lightStatus').textContent=next.lightingStatus;
-  $('firmwareName').textContent=next.usb?.includes('0.4.3-keyberth') ? '키버스-펌웨어 / 0.4.3' : next.usb?.includes('0.4.2-keyberth') ? '키버스-펌웨어 / 0.4.2' : next.usb?.includes('0.4.1-keyberth') ? '키버스-펌웨어 / 0.4.1' : next.usb?.includes('0.4.0-keyberth') ? '키버스-펌웨어 / 0.4.0' : next.usb?.includes('0.3.0-keyberth') ? '키버스-펌웨어 / 0.3.0' : next.usb?.includes('0.2.0-keyberth') ? '키버스-펌웨어 / 0.2.0' : next.usb?.includes('0.1.0-keyberth-dev') ? 'Keyberth USB / 0.1.0-dev' : next.usb?.includes('0.2.18') ? 'Universal Agent / 0.2.18' : 'AI Micro';
+  $('firmwareName').textContent=next.usb?.includes('0.4.4-keyberth') ? '키버스-펌웨어 / 0.4.4' : next.usb?.includes('0.4.3-keyberth') ? '키버스-펌웨어 / 0.4.3' : next.usb?.includes('0.4.2-keyberth') ? '키버스-펌웨어 / 0.4.2' : next.usb?.includes('0.4.1-keyberth') ? '키버스-펌웨어 / 0.4.1' : next.usb?.includes('0.4.0-keyberth') ? '키버스-펌웨어 / 0.4.0' : next.usb?.includes('0.3.0-keyberth') ? '키버스-펌웨어 / 0.3.0' : next.usb?.includes('0.2.0-keyberth') ? '키버스-펌웨어 / 0.2.0' : next.usb?.includes('0.1.0-keyberth-dev') ? 'Keyberth USB / 0.1.0-dev' : next.usb?.includes('0.2.18') ? 'Universal Agent / 0.2.18' : 'AI Micro';
   for(const [i,local] of next.slots.entries()){
     const input='K'+String(i+1).padStart(2,'0');
     const value=next.mappings[input] || '';
@@ -618,17 +618,36 @@ function settingsPanel(id) {
 }
 for(const tab of document.querySelectorAll('[data-panel]')) tab.onclick=()=>settingsPanel(tab.dataset.panel);
 settingsPanel('hardware');
+let firmwareRecords=[];
+function showFirmwareRecord() {
+  const record=firmwareRecords[$('firmwareRecord').selectedIndex];
+  $('firmwareReport').textContent=record ? JSON.stringify(record,null,2) : '저장된 기록이 없습니다.';
+  $('copyFirmwareRecord').disabled=!record;
+}
+async function loadFirmwareHistory() {
+  try {
+    firmwareRecords=await api('firmwareHistory');
+    $('firmwareRecord').replaceChildren(...firmwareRecords.map(record=>{
+      const first=record[0], end=record.find(e=>e.result);
+      return new Option(new Date(first.time*1000).toLocaleString()+' · '+first.action+' · '+(end?.result || '진행 중 또는 미완료'));
+    }));
+    showFirmwareRecord();
+  } catch(error) { $('firmwareReport').textContent=error.message; }
+}
+$('firmwareHistory').ontoggle=()=>{ if($('firmwareHistory').open) void loadFirmwareHistory(); };
+$('firmwareRecord').onchange=showFirmwareRecord;
+$('copyFirmwareRecord').onclick=()=>navigator.clipboard.writeText($('firmwareReport').textContent).catch(fail);
 const firmwareButtons=[...document.querySelectorAll('[data-firmware]')];
 for(const button of firmwareButtons)button.onclick=async()=>{
   for(const item of firmwareButtons)item.disabled=true;
   $('firmwareProgress').textContent='펌웨어 작업이 끝날 때까지 USB 연결을 유지하세요.';
   try {
     const result=await api('manageFirmware',{action:button.dataset.firmware});
-    const messages={current:'최신 키버스 펌웨어가 설치되어 있습니다.',done:'펌웨어 작업을 완료했습니다.',busy:'다른 펌웨어 작업이 진행 중입니다.',cancelled:'작업을 취소했습니다.',failed:'펌웨어 작업에 실패했습니다.'};
+    const messages={diagnosed:'읽기 전용 진단을 완료했습니다.',current:'최신 키버스 펌웨어가 설치되어 있습니다.',done:'펌웨어 작업을 완료했습니다.',busy:'다른 펌웨어 작업이 진행 중입니다.',cancelled:'작업을 취소했습니다.',failed:'펌웨어 작업에 실패했습니다.'};
     $('firmwareProgress').textContent=messages[result];
     if(result==='done'){prefs=null;await device(false);await poll();}
   } catch(error){$('firmwareProgress').textContent=error.message;}
-  finally{for(const item of firmwareButtons)item.disabled=false;}
+  finally{for(const item of firmwareButtons)item.disabled=false;if($('firmwareHistory').open)void loadFirmwareHistory();}
 };
 function show(name){
   view=name;
@@ -697,7 +716,17 @@ for(const action of ['importMaps','exportMaps']) {
 }
 const firmwareWait=$('firmwareWait');
 firmwareWait.addEventListener('cancel',event=>event.preventDefault());
+let liveStageTimer;
+async function updateLiveStage() {
+  try {
+    const active=(await api('firmwareHistory')).find(record=>!record.some(entry=>entry.result));
+    if (firmwareWait.open) $('firmwareLiveStage').textContent=active?.at(-1)?.stage ?? '';
+  } catch { /* The next poll retries while the progress dialog is open. */ }
+}
 window.keyberth.onFirmwareProgress(message=>{
+  clearInterval(liveStageTimer);
+  $('firmwareLiveStage').textContent='';
+  if (message) liveStageTimer=setInterval(updateLiveStage,1000);
   if (message) {
     $('firmwareWaitTitle').textContent=message;
     if (!firmwareWait.open) firmwareWait.showModal();

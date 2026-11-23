@@ -197,6 +197,8 @@ extern "C" void app_main() {
     bleError=aim::ble_begin(receive);
     ESP_LOGI("keyberth","board=%s",esp_err_to_name(board_error));
     agent.alert=[] {
+        lastActivity=esp_timer_get_time()/1000;
+        standbyLights=false;
         if(board_error==ESP_OK && kb::prefs.buzzer && kb::prefs.volume &&
            board.tone(2700,160,kb::prefs.volume)) ++sessionBeeps;
     };

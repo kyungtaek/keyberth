@@ -21,12 +21,12 @@ struct KeymapArchive: Codable {
 
     static func common(_ value:String) -> Bool {
         value == "none" || (1...6).contains { value == "allRecent."+String($0) } ||
-        MacActions.system[value] != nil || MacActions.appID(value) != nil || DesktopShortcut.valid(value)
+        MacActions.targetLabels[value] != nil || MacActions.system[value] != nil || MacActions.appID(value) != nil || DesktopShortcut.valid(value)
     }
     static func accepts(_ value:String, input:String, profile p:AppProfile) -> Bool {
         guard KeyMap.controls.contains(input), !value.isEmpty, value.utf8.count <= 4096 else { return false }
         if value == "inherit" || value == "none" || (1...6).contains(where:{ value == "allRecent."+String($0) }) { return true }
-        if MacActions.system[value] != nil || MacActions.appID(value) != nil { return true }
+        if MacActions.targetLabels[value] != nil || MacActions.system[value] != nil || MacActions.appID(value) != nil { return true }
         if [.codex,.cmux,.t3].contains(p), ApplicationMenu.path(value) != nil { return true }
         if p == .cmux { return p.agentActions[value] != nil || KeyMap.controls.contains(value) || FunctionKey.shortcut(value) != nil }
         return p.agentActions[value] != nil || value == "none" || DesktopShortcut.valid(value)

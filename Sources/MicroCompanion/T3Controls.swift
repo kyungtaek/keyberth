@@ -193,6 +193,11 @@ import MicroCore
             try ctx.focusComposer()
             guard stillActive(), ctx.route == route else { throw CompanionError("T3 세션이 변경됐습니다.") }
             try DesktopShortcut.send(chord("thread.settle",default:"cmd+shift+s"),to:.t3)
+            for _ in 0..<15 {
+                try await Task.sleep(nanoseconds:100_000_000)
+                if try !DesktopSessions.t3NeedsSettlement(route:route) { return }
+            }
+            throw CompanionError("T3의 대화 닫기 반영을 확인할 수 없습니다.")
         case "agent.stop","agent.resume":
             let buttons = try Context().buttons([action == "agent.stop" ? "Stop generation" : "Resume thread"])
             guard buttons.count == 1 else { throw CompanionError("현재 대화에서 해당 동작을 사용할 수 없습니다.") }

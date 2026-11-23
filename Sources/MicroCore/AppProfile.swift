@@ -112,7 +112,7 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
     private static let t3Controls: [(input:String, action:String, label:String)] = [
         ("JOY_DOWN","agent.terminal","터미널 열기/닫기"), ("JOY_RIGHT","agent.rightPanel","오른쪽 사이드 패널 열기/닫기"),
         ("K07","agent.newChat","새 대화"), ("K08","agent.approve","이번 요청 승인"),
-        ("K09","agent.settle","현재 세션 정리"), ("K10","agent.fork","현재 세션 포크"),
+        ("K09","agent.settle","현재 대화 닫기 · 정리 (Settled)"), ("K10","agent.fork","현재 세션 포크"),
         ("K11","agent.dictate","누르고 받아쓰기"), ("K12","agent.stop","현재 진행 중단"), ("K13","agent.submit","보내기")
     ]
 
