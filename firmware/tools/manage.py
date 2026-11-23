@@ -134,6 +134,7 @@ def run(action, image):
         reset_version=initial.get("firmware")
         require(reset_version in ("0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth","0.4.3-keyberth",VERSION),"공장 초기화는 키버스 펌웨어 0.4.0 이상에서 지원합니다.")
         check(reset_version)
+        stage("공장 초기화 요청")
         with serial.Serial(port.device,115200,timeout=1) as link:
             link.write(b"KEYBERTH FACTORY_RESET CONFIRM\n")
             link.flush()
@@ -146,6 +147,7 @@ def run(action, image):
             expected=dict(sleepMinutes=15,volumePercent=50,buzzerEnabled=True,brightness=100,
                           standbyMinutes=5,standbyPowered=True,standbyBluetooth=False,styles=[""]*14)
             require(saved.get("ok") and all(saved.get(k)==v for k,v in expected.items()),"기본값 검증 실패")
+        stage("초기화 기본값 검증")
         wait_for(defaults,25)
         return reset_version
     if action=="update":
@@ -156,8 +158,10 @@ def run(action, image):
         if initial.get("firmware")!=STOCK_VERSION:
             require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth","0.4.3-keyberth",VERSION),"지원하는 키버스-펌웨어만 롤백할 수 있습니다.")
             check(initial["firmware"])
+            stage("정품 부팅 요청")
             with serial.Serial(port.device,115200,timeout=1) as link:
                 link.write(b"KEYBERTH ROLLBACK\n");link.flush()
+        stage("정품 재부팅 확인")
         wait_for(lambda:check(STOCK_VERSION,after_reboot=True),25)
         return
     check(initial["firmware"])

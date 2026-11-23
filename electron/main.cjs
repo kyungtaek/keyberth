@@ -128,9 +128,9 @@ const firmwareControls=require('./firmware.cjs').firmwareControls(app,dialog,res
 ipcMain.handle('command', async (event, method, data) => {
   if (fileURLToPath(event.senderFrame.url) !== page) throw new Error('Unknown window');
   if (method==='firmwareHistory') return firmwareControls.history();
-  if (firmwareProgress && !['state','catalog'].includes(method)) throw new Error('펌웨어 작업 중입니다.');
   if (method==='manageFirmware' && editor && event.sender===editor.webContents)
     return firmwareControls.manage(data?.action);
+  if (firmwareProgress && !['state','catalog'].includes(method)) throw new Error('펌웨어 작업 중입니다.');
   if (['addProfile','removeProfile','addFavorite','removeFavorite'].includes(method)) {
     if (!editor || event.sender!==editor.webContents) throw Error('편집 창에서 키맵을 관리하세요.');
     if (method==='removeFavorite') return request(method,{profile:data.profile});

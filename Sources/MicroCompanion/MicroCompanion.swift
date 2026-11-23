@@ -435,14 +435,27 @@ import MicroCore
                 defer { if targetPresses[code] == token { targetPresses.removeValue(forKey:code) } }
                 do {
                     try await MacActions.launch(bundle)
-                    let deadline = ProcessInfo.processInfo.systemUptime + 5
+                    let deadline = ProcessInfo.processInfo.systemUptime + 12
                     while true {
                         if target.mic && targetPresses[code] != token { return }
                         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundle,
-                           let app=NSRunningApplication.runningApplications(withBundleIdentifier:bundle).first,
-                           AppNode(element:AXUIElementCreateApplication(app.processIdentifier)).node("AXFocusedWindow") != nil { break }
+                           let app=NSRunningApplication.runningApplications(withBundleIdentifier:bundle).first {
+                            let root=AppNode(element:AXUIElementCreateApplication(app.processIdentifier))
+                            AXUIElementSetAttributeValue(root.element,"AXManualAccessibility" as CFString,kCFBooleanTrue)
+                            if let window=root.node("AXFocusedWindow") {
+                                if target.profile == .cmux { break }
+                                let ready=window.descendants({ node in
+                                    if !target.mic { return node.role == "AXWebArea" }
+                                    if target.profile == .claude {
+                                        return node.role == "AXButton" && ["start dictation","dictate","받아쓰기 시작","받아쓰기"].contains(ClaudeControls.label(node).lowercased())
+                                    }
+                                    return node.role == "AXTextArea" && node.identifier.contains(target.profile == .t3 ? "composer-tiptap" : "prosemirror")
+                                },first:true)
+                                if !ready.isEmpty { break }
+                            }
+                        }
                         guard ProcessInfo.processInfo.systemUptime < deadline else { throw CompanionError("대상 앱의 창을 열 수 없습니다.") }
-                        try await Task.sleep(nanoseconds:50_000_000)
+                        try await Task.sleep(nanoseconds:150_000_000)
                     }
                     if target.mic {
                         guard micProfile == nil else { return }
@@ -660,6 +673,7 @@ import MicroCore
         }
     }
     func stop() {
+        targetPresses.removeAll()
         if profile == .claudeCode { ClaudeCodeHook.endLease() }
         finishMic()
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver); self.wakeObserver=nil }
@@ -674,6 +688,7 @@ import MicroCore
     }
     func connect() {
         guard !connecting, !selecting else { return }
+        targetPresses.removeAll()
         finishMic()
         let token = UUID()
         epoch = token
@@ -690,7 +705,7 @@ import MicroCore
                 guard epoch == token else { return }
                 deviceStatus = "Universal Agent 세션 연결 중"
                 device = try AgentHID(location: location, expectedVersion:version, status: { [weak self] message in
-                    if self?.epoch == token { self?.deviceStatus = message; if message.contains("다시 연결") { self?.finishMic() } }
+                    if self?.epoch == token { self?.deviceStatus = message; if message.contains("다시 연결") { self?.targetPresses.removeAll(); self?.finishMic() } }
                 }, ready: { [weak self] in
                     guard let self, self.epoch == token else { return }
                     self.updateLights()

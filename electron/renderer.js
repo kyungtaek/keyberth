@@ -643,7 +643,7 @@ for(const button of firmwareButtons)button.onclick=async()=>{
   $('firmwareProgress').textContent='펌웨어 작업이 끝날 때까지 USB 연결을 유지하세요.';
   try {
     const result=await api('manageFirmware',{action:button.dataset.firmware});
-    const messages={diagnosed:'읽기 전용 진단을 완료했습니다.',current:'최신 키버스 펌웨어가 설치되어 있습니다.',done:'펌웨어 작업을 완료했습니다.',busy:'다른 펌웨어 작업이 진행 중입니다.',cancelled:'작업을 취소했습니다.',failed:'펌웨어 작업에 실패했습니다.'};
+    const messages={'reconnect-failed':'기기 작업은 끝났지만 앱 재연결에 실패했습니다.',diagnosed:'읽기 전용 진단을 완료했습니다.',current:'최신 키버스 펌웨어가 설치되어 있습니다.',done:'펌웨어 작업을 완료했습니다.',busy:'다른 펌웨어 작업이 진행 중입니다.',cancelled:'작업을 취소했습니다.',failed:'펌웨어 작업에 실패했습니다.'};
     $('firmwareProgress').textContent=messages[result];
     if(result==='done'){prefs=null;await device(false);await poll();}
   } catch(error){$('firmwareProgress').textContent=error.message;}

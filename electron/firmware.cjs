@@ -15,7 +15,7 @@ function firmwareControls(app, dialog, reconnect, progress, suspend) {
     function finish(result) { log.add('종료',{result}); return result; }
     if (busy) return finish('busy');
     busy = true;
-    let paused=false;
+    let paused=false, helperCompleted=false;
     try {
       const actions = {
         diagnose: ['펌웨어 진단',''],
@@ -34,14 +34,15 @@ function firmwareControls(app, dialog, reconnect, progress, suspend) {
       if (action !== 'diagnose') { await suspend(); paused=true; }
       log.add('설치 관리자 시작',{helperVersion:'0.4.4'});
       const {stdout}=await run(helper,[action,image],{env:{...process.env,KEYBERTH_FIRMWARE_JOURNAL:log.file}});
+      helperCompleted=true;
       log.add('설치 관리자 완료',{exit:0});
       if (action==='diagnose') {
         await dialog.showMessageBox({message:'펌웨어 진단 완료',detail:'연결된 펌웨어 '+stdout.trim(),buttons:['확인']});
         return finish('diagnosed');
       }
       log.add('앱 브리지 재연결');
-      await reconnect();
       paused=false;
+      await reconnect();
       if (stdout.trim()==='already-current') {
         await dialog.showMessageBox({message:'키버스 펌웨어 0.4.4가 이미 설치되어 있습니다.',buttons:['확인']});
         return finish('current');
@@ -53,9 +54,15 @@ function firmwareControls(app, dialog, reconnect, progress, suspend) {
       const lines=(error.stderr || error.message).trim().split(/\r?\n/);
       const reason=lines.filter(line=>line.trim() && !/^\[PYI-/.test(line)).at(-1);
       const safe=(reason || '작업 실패').replace(/(?:[0-9a-f]{2}:){5}[0-9a-f]{2}/ig,'[기기]').replace(/(?:\/[^\s]+)+/g,'[경로]').slice(0,240);
-      log.add('오류',{error:safe,code:error.code ?? null,signal:error.signal ?? null});
-      dialog.showErrorBox('펌웨어 작업을 완료하지 못했습니다.',safe+'\n작업 ID '+log.id);
-      return finish('failed');
+      const stages=log.read();
+      const failedStage=stages.at(-1)?.stage;
+      const lastSuccess=stages.at(-2)?.stage;
+      log.add('오류',{failedStage,lastSuccess,error:safe,code:error.code ?? null,signal:error.signal ?? null});
+      const result=finish(helperCompleted && action!=='diagnose' ? 'reconnect-failed' : 'failed');
+      const choice=await dialog.showMessageBox({type:'error',message:result==='reconnect-failed'?'기기 작업 후 앱 재연결에 실패했습니다.':'펌웨어 작업을 완료하지 못했습니다.',
+        detail:[safe,failedStage,'작업 ID '+log.id].join('\n'),buttons:['확인','진단 기록 복사']});
+      if(choice.response===1) require('electron').clipboard.writeText(JSON.stringify(log.read(),null,2));
+      return result;
     } finally { try { if (paused) await reconnect(); } catch { log.add('브리지 복구 대기'); } busy=false; progress(''); }
   }
   return {manage, history:records.list, menu:{label:'기기 펌웨어',submenu:[

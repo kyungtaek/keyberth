@@ -14,13 +14,15 @@ function history(app) {
     }
     add('작업 요청',{id,action,app:app.getVersion(),macOS:process.getSystemVersion?.(),macOSKernel:os.release(),arch:process.arch,target:'0.4.4'});
     for(const old of files().slice(50)) fs.unlinkSync(path.join(dir,old));
-    return {id,file,add};
+    return {id,file,add,read:()=>read(file)};
   }
   function list() {
-    return files().map(name=>{
-      const lines=fs.readFileSync(path.join(dir,name),'utf8').trim().split('\n');
+    return files().map(name=>read(path.join(dir,name))).filter(record=>record.length);
+  }
+  function read(file) {
+      const lines=fs.readFileSync(file,'utf8').trim().split('\n');
       return lines.flatMap(line=>{try{return [JSON.parse(line)];}catch{return [];}});
-    }).filter(record=>record.length);
+
   }
   return {begin,list};
 }
