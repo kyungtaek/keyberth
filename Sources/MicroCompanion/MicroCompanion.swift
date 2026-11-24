@@ -48,18 +48,19 @@ import MicroCore
     private var profileList:[[String:String]] { enabled.map { ["id":$0.rawValue,"name":title($0)] } }
     private func storeEnabled() { KeyMap.preferences.set(enabled.map(\.rawValue),forKey:"enabledAppProfiles") }
     private var automatic = (KeyMap.preferences.object(forKey:"automaticKeyMap") as? Bool) ?? true
+    private let appSwitchHUD = AppSwitchHUDSetting(preferences: KeyMap.preferences)
     private var wakeObserver: NSObjectProtocol?
     private var focusObserver: NSObjectProtocol?
     var feedback = ""
 
-    private func hud(_ subtitle: String, changes:[[String:String]] = []) {
-        let event:[String:Any] = ["event":"hud", "title":title(profile), "subtitle":subtitle,"keys":changes]
+    private func hud(_ subtitle: String, changes:[[String:String]] = [], fromAppSwitch: Bool = false) {
+        let event:[String:Any] = ["event":"hud", "title":title(profile), "subtitle":subtitle, "keys":changes, "fromAppSwitch":fromAppSwitch]
         if var bytes = try? JSONSerialization.data(withJSONObject:event) {
             bytes.append(10)
             FileHandle.standardOutput.write(bytes)
         }
     }
-    private func activate(_ next: AppProfile, notify: Bool = true) {
+    private func activate(_ next: AppProfile, trigger: AppSwitchHUDSetting.Trigger = .manual) {
         guard next != profile else { return }
         if micProfile != next { finishMic() }
         selectedClaudeCode = nil
@@ -76,7 +77,7 @@ import MicroCore
         updateLights()
         refreshDesktop()
         KeyMap.preferences.set(next.rawValue, forKey:"selectedKeyMap")
-        if notify {
+        if appSwitchHUD.allows(trigger) {
             let changes = KeyMap.controls.compactMap { key -> [String:String]? in
                 let value = binding(key,in:next)
                 let old = binding(key,in:previous)
@@ -87,24 +88,24 @@ import MicroCore
                 let name = commonIndex(value).map { "통합 최근 세션 "+String($0+1) } ?? ObsidianNote.path(value).map { URL(fileURLWithPath:$0).deletingPathExtension().lastPathComponent } ?? label
                 return ["key":key,"name":name]
             }
-            if !changes.isEmpty { hud("키맵 전환", changes:changes) }
+            if !changes.isEmpty { hud("키맵 전환", changes:changes, fromAppSwitch:trigger == .appSwitch) }
         }
     }
-    private func follow(_ bundle: String?, notify: Bool = true) {
+    private func follow(_ bundle: String?, trigger: AppSwitchHUDSetting.Trigger = .appSwitch) {
         guard automatic, let bundle else { return }
         if AppProfile.claude.bundleIDs.contains(bundle), enabled.contains(.claudeCode),
            !enabled.contains(.claude) || KeyMap.preferences.string(forKey:"preferredClaudeProfile") == AppProfile.claudeCode.rawValue {
-            activate(.claudeCode,notify:notify)
+            activate(.claudeCode,trigger:trigger)
         } else if let next = enabled.first(where: { $0.bundleIDs.contains(bundle) }) {
-            activate(next,notify:notify)
+            activate(next,trigger:trigger)
         } else if !["local.kent.microcmux","com.github.Electron"].contains(bundle) {
-            activate(.unconfigured,notify:notify)
+            activate(.unconfigured,trigger:trigger)
         }
     }
     private func toggleAutomatic() {
         automatic.toggle()
         KeyMap.preferences.set(automatic, forKey:"automaticKeyMap")
-        follow(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, notify:false)
+        follow(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, trigger:.silent)
         hud(automatic ? "자동 전환 켬" : "자동 전환 끔")
     }
     private var global = KeyMap.preferences.dictionary(forKey:"globalBindings") as? [String:String] ?? [:]
@@ -650,7 +651,7 @@ import MicroCore
     }
 
     func start() {
-        if profile != .unconfigured, !enabled.contains(profile) { activate(enabled.first ?? .unconfigured,notify:false) }
+        if profile != .unconfigured, !enabled.contains(profile) { activate(enabled.first ?? .unconfigured,trigger:.silent) }
         guard timer == nil else { return }
         focusObserver = NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didActivateApplicationNotification, object:nil, queue:.main) { [weak self] note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
@@ -659,7 +660,7 @@ import MicroCore
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didWakeNotification,object:nil,queue:.main) { [weak self] _ in
             Task { @MainActor in self?.connect() }
         }
-        follow(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, notify:false)
+        follow(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, trigger:.silent)
         connect()
         composerTimer = Timer.scheduledTimer(withTimeInterval:0.4,repeats:true) { [weak self] _ in
             Task { @MainActor in self?.refreshComposer() }
@@ -780,6 +781,7 @@ import MicroCore
         let styles: [String]?
         let archive: KeymapArchive?
         let revision: UInt32?
+        let showAppSwitchHUD: Bool?
         let lightState: String?
         let rule: SessionLighting.Rule?
     }
@@ -812,7 +814,7 @@ import MicroCore
         }
         let lightStatus = device?.lightingStatus ?? ""
         return ["profiles":profileList, "claudeOptions":claudeOptions(), "lightingStatus": lightStatus.isEmpty ? "USB 연결 대기" : lightStatus, "slots": slots, "usb": deviceStatus, "cmux": profile.hasRecentSessions ? sessionStatus : (profile == .cmux ? cmuxStatus : profile.title), "feedback": feedback,
-                "profile": profile.rawValue, "automatic":automatic,
+                "profile": profile.rawValue, "automatic":automatic, "showAppSwitchHUD":appSwitchHUD.isEnabled,
                 "globalMappings":Dictionary(uniqueKeysWithValues:KeyMap.controls.map { ($0,global[$0] ?? globalDefault($0)) }),
                 "explicitGlobal":Array(global.keys).sorted(), "appOverrides":exportMaps,
                 "explicitLocal":(profile == .cmux ? cmuxMappings : profiles[profile.rawValue] ?? [:]).filter { $0.value != "inherit" }.keys.sorted(),
@@ -940,6 +942,10 @@ import MicroCore
             case "activateProfile":
                 guard let id = r.profile, let next = AppProfile(rawValue:id), (enabled.contains(next) || next == .unconfigured) else { throw CompanionError("알 수 없는 키맵") }
                 activate(next)
+                result["value"] = state()
+            case "setAppSwitchHUD":
+                guard let enabled = r.showAppSwitchHUD else { throw CompanionError("HUD 설정값을 확인하세요.") }
+                appSwitchHUD.isEnabled = enabled
                 result["value"] = state()
             case "toggleAuto":
                 toggleAutomatic()

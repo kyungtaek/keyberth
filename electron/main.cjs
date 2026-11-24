@@ -29,7 +29,7 @@ function showHud(message) {
       } catch (error) { console.warn('HUD material:', error.message); }
       if (!applied) hud.setVibrancy('hud');
       hudReady = true;
-      showHud(hudMessage);
+      if (hudMessage) showHud(hudMessage);
     });
     hud.loadFile(path.join(__dirname,'hud.html'));
     return;
@@ -44,7 +44,16 @@ function showHud(message) {
   hud.webContents.send('hud', message);
   hud.showInactive();
   clearTimeout(hudTimer);
-  hudTimer = setTimeout(() => hud.hide(), message.keys?.length ? 2300 : 1500);
+  hudTimer = setTimeout(() => {
+    hudMessage = null;
+    hud.hide();
+  }, message.keys?.length ? 2300 : 1500);
+}
+function dismissAppSwitchHud() {
+  if (!hudMessage?.fromAppSwitch) return;
+  hudMessage = null;
+  clearTimeout(hudTimer);
+  hud.hide();
 }
 function startBridge() {
   const child = spawn(helper, process.argv.includes('--agent-diagnostics') ? ['--agent-diagnostics'] : [],
@@ -192,6 +201,13 @@ else {
         const state = await request('state');
         const change = (method, data) => request(method, data).catch(error => dialog.showErrorBox('키맵 변경 실패', error.message));
         controls = [{label:'포커스된 앱으로 자동 전환', type:'checkbox', checked:state.automatic, click:()=>change('toggleAuto')},
+          {label:'앱 자동 전환 시 HUD 표시', type:'checkbox', checked:state.showAppSwitchHUD,
+            click:async item=>{
+              try {
+                const next = await request('setAppSwitchHUD', {showAppSwitchHUD:item.checked});
+                if (!next.showAppSwitchHUD) dismissAppSwitchHud();
+              } catch (error) { dialog.showErrorBox('HUD 설정 변경 실패', error.message); }
+            }},
           ...[{id:"unconfigured",name:"글로벌"},...state.profiles].map(profile => ({label:profile.name, type:'radio', checked:profile.id === state.profile,
             click:()=>change('activateProfile', {profile:profile.id})}))];
       } catch {
