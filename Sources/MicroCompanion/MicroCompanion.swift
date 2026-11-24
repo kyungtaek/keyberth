@@ -137,13 +137,16 @@ import MicroCore
     private var codexPickerTask: Task<Void,Never>?
     private var codexForkPending = false
     private var targetPresses = [String:UUID]()
+    private var launchingOrcaCodex = false
     private var micKeys = Set<String>()
+    private var releaseOrcaDictation: (() -> Void)?
     private func finishMic() {
         cmuxSpace.cancel()
         guard let held = micProfile else { return }
         micProfile = nil
         micKeys.removeAll()
         do {
+            if let release = releaseOrcaDictation { releaseOrcaDictation=nil; release(); return }
             if let hold = t3Dictation {
                 t3Dictation = nil
                 try hold.finish()
@@ -509,7 +512,26 @@ import MicroCore
                 return
             }
             do {
-                if let index = recentIndex(binding), profile.hasRecentSessions {
+                if profile == .orca, let action = OrcaCatalog.byBinding[binding] {
+                    if action.id == OrcaControls.codexTab {
+                        guard !launchingOrcaCodex else { return }
+                        launchingOrcaCodex = true
+                        Task {
+                            defer { launchingOrcaCodex=false }
+                            do { try await OrcaControls.launchCodex() }
+                            catch { feedback=error.localizedDescription; hud(feedback) }
+                        }
+                    } else if action.id == "voice.dictation" {
+                        if micProfile == nil {
+                            releaseOrcaDictation = try OrcaControls.press(action)
+                            micProfile = .orca
+                        }
+                        if micProfile == .orca { micKeys.insert(code) }
+                    } else {
+                        let release = try OrcaControls.press(action)
+                        release()
+                    }
+                } else if let index = recentIndex(binding), profile.hasRecentSessions {
                     guard sessions.indices.contains(index), let item = sessions[index] else { throw CompanionError("빈 세션 슬롯입니다.") }
                     let source = profile
                     Task {
@@ -911,8 +933,12 @@ import MicroCore
                 if let id=r.profile { MacActions.favorites[id] = nil }
                 result["value"] = MacActions.favorites
             case "catalog":
+                let orcaOverrides = try? OrcaControls.readOverrides()
+                let orcaNeedsShortcut = OrcaCatalog.byBinding.compactMap { binding,action in
+                    action.id != OrcaControls.codexTab && (try? OrcaControls.chord(for:action,overrides:orcaOverrides ?? [:])) == nil ? binding : nil
+                }
                 result["value"] = ["profiles": profileList, "templates":AppProfile.allCases.map { ["id":$0.rawValue,"name":$0.title] }, "controls": KeyMap.controls.map { ["id": $0, "name": KeyMap.name($0), "action": KeyMap.label($0)] },
-                                   "presets":Dictionary(uniqueKeysWithValues:AppProfile.allCases.map { ($0.rawValue,KeyMap.preset($0)) }), "appDefaults":Dictionary(uniqueKeysWithValues:AppProfile.allCases.map { p in (p.rawValue,Dictionary(uniqueKeysWithValues:KeyMap.controls.map { ($0,p.defaultBinding($0)) })) }), "agentActions": Dictionary(uniqueKeysWithValues: AppProfile.allCases.map { ($0.rawValue,$0.agentActions) }), "targetActions":MacActions.targetLabels,"systemActions":MacActions.system, "favorites":MacActions.favorites, "slackActions": zip(SlackAction.inputs,SlackAction.labels).map { ["id":"slack."+$0.0,"name":$0.1] }, "modifiers": FunctionKey.modifiers, "special": FunctionKey.specialKeys] as [String: Any]
+                                   "presets":Dictionary(uniqueKeysWithValues:AppProfile.allCases.map { ($0.rawValue,KeyMap.preset($0)) }), "appDefaults":Dictionary(uniqueKeysWithValues:AppProfile.allCases.map { p in (p.rawValue,Dictionary(uniqueKeysWithValues:KeyMap.controls.map { ($0,p.defaultBinding($0)) })) }), "agentActions": Dictionary(uniqueKeysWithValues: AppProfile.allCases.map { ($0.rawValue,$0.agentActions) }), "orcaNeedsShortcut":orcaNeedsShortcut, "orcaGroups":OrcaCatalog.byBinding.mapValues(\.group), "targetActions":MacActions.targetLabels,"systemActions":MacActions.system, "favorites":MacActions.favorites, "slackActions": zip(SlackAction.inputs,SlackAction.labels).map { ["id":"slack."+$0.0,"name":$0.1] }, "modifiers": FunctionKey.modifiers, "special": FunctionKey.specialKeys] as [String: Any]
             case "addProfile":
                 let next:AppProfile
                 if let path=r.target, path.hasSuffix(".app"), let id=Bundle(url:URL(fileURLWithPath:path))?.bundleIdentifier {

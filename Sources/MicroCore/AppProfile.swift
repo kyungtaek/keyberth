@@ -5,7 +5,8 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
 
     case application(String), unconfigured
 
-    public static let allCases: [Self] = [.cmux,.t3,.codex,.claude,.claudeCode]
+    public static let orca = Self.application("com.stablyai.orca")
+    public static let allCases: [Self] = [.cmux,.t3,.codex,.claude,.claudeCode,.orca]
     public static let initial: [Self] = [.cmux,.t3,.codex,.claude,.claudeCode]
     public var rawValue:String {
         switch self {
@@ -30,7 +31,7 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
     public var selectable:Bool { self != .slack && self != .obsidian && self != .unconfigured }
     public var title: String {
         switch self {
-        case .application(let id):return id
+        case .application(let id):return self == .orca ? "Orca" : id
         case .unconfigured:return "키맵 없음"
         case .cmux: return "cmux"
         case .slack: return "Slack"
@@ -59,6 +60,7 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
     public var hasRecentSessions: Bool { [.t3, .claudeCode, .claude, .codex].contains(self) }
 
     public var agentActions: [String:String] {
+        if self == .orca { return OrcaCatalog.byBinding.mapValues(\.title) }
         if self == .cmux {
             return ["agent.stop":"터미널 작업 중단 (SIGINT)", "agent.wake":"최대 절전 에이전트 깨우기",
                     "agent.hibernate":"에이전트 최대 절전", "agent.splitRight":"오른쪽 터미널 분할", "agent.splitDown":"아래 터미널 분할"]
@@ -117,6 +119,15 @@ public enum AppProfile: RawRepresentable, Hashable, CaseIterable {
     ]
 
     public func defaultBinding(_ input: String) -> String {
+        if self == .orca {
+            if input == "K13" { return "enter" }
+            let actions = ["K07":"worktree.palette", "K08":"dashboard.toggle", "K09":"workspace.openBoard",
+                           "K10":"sidebar.right.toggle", "K11":"voice.dictation", "K12":"tab.newAgent",
+                           "ENC_CCW":"tab.previousAllTypes", "ENC_CW":"tab.nextAllTypes", "ENC_PRESS":"floatingTerminal.toggle",
+                           "JOY_UP":"worktree.navigateUp", "JOY_DOWN":"worktree.navigateDown",
+                           "JOY_LEFT":"terminal.focusPreviousPane", "JOY_RIGHT":"terminal.focusNextPane"]
+            return actions[input].map { "orca." + $0 } ?? "none"
+        }
         if case .application = self {return "none"}
         if self == .unconfigured {return "none"}
         if self == .codex {

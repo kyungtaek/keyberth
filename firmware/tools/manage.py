@@ -19,11 +19,12 @@ from serial.tools.list_ports import comports
 from verify_backup import STOCK, verify
 
 ROOT = Path.home() / "Library/Application Support/Keyberth/Recovery"
-VERSION = "0.4.4-keyberth"
+VERSION = "0.4.5-keyberth"
 PREVIOUS_VERSION = "0.2.0-keyberth"
 STOCK_VERSION = "0.2.18-ai-micro-agent"
-IMAGE_HASH = "29b37f09f997c80388139046a96a1f86a860db1b8b8e83d9ca27bd55ee4115a9"
+IMAGE_HASH = "eb24906e4141abc8776ac1d7ec222dc900f92073c588f0c8fc19bff23c1055fd"
 PREVIOUS_IMAGES = (
+    (671776, "29b37f09f997c80388139046a96a1f86a860db1b8b8e83d9ca27bd55ee4115a9"),
     (671744, "d0fffcb4609b1999e20183bb4d1c216877b0ef8ccade1a5f14be307fa003bdee"),
     (671152, "056332209bec88e5bff2ea073b7db43c26d77bc7d68bc91624b219e29e5ef73a"),
     (670352, "0c46e683c6ae8c1383b630cbc87964a48b6ab01e2d2574f46f7e9db09b137ee3"),
@@ -93,6 +94,24 @@ def stage(name, **details):
         with open(journal,"a",encoding="utf-8") as stream:
             stream.write(json.dumps(dict(time=time.time(),stage=name,**details),ensure_ascii=False)+"\n")
 
+class BackupProgress(io.StringIO):
+    """Expose esptool 4.14 read progress without logging its device identifiers."""
+    def __init__(self, label):
+        super().__init__()
+        self.label = label
+        self.last_percent = 0
+        stage(label, percent=0)
+
+    def write(self, text):
+        match = re.fullmatch(r"(\d+) \((\d+) %\)[\b\n]*", text)
+        if match:
+            percent = int(match[2])
+            if self.last_percent < percent <= 100:
+                stage(self.label, percent=percent)
+                self.last_percent = percent
+        return len(text)
+
+
 def run(action, image):
     stage("이미지 확인", target=VERSION, sha256=hashlib.sha256(image.read_bytes()).hexdigest())
     require(hashlib.sha256(image.read_bytes()).hexdigest()==IMAGE_HASH,"이미지 체크섬 불일치")
@@ -132,7 +151,7 @@ def run(action, image):
         require(initial.get("firmware")==STOCK_VERSION,"기존 키버스 펌웨어가 설치되어 있습니다. 업데이트를 선택하세요.")
     if action=="reset":
         reset_version=initial.get("firmware")
-        require(reset_version in ("0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth","0.4.3-keyberth",VERSION),"공장 초기화는 키버스 펌웨어 0.4.0 이상에서 지원합니다.")
+        require(reset_version in ("0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth","0.4.3-keyberth","0.4.4-keyberth",VERSION),"공장 초기화는 키버스 펌웨어 0.4.0 이상에서 지원합니다.")
         check(reset_version)
         stage("공장 초기화 요청")
         with serial.Serial(port.device,115200,timeout=1) as link:
@@ -151,12 +170,12 @@ def run(action, image):
         wait_for(defaults,25)
         return reset_version
     if action=="update":
-        require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth","0.4.3-keyberth",VERSION),"키버스 펌웨어에서 업데이트할 수 있습니다.")
+        require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth","0.4.3-keyberth","0.4.4-keyberth",VERSION),"키버스 펌웨어에서 업데이트할 수 있습니다.")
         require(hashlib.sha256(image.read_bytes()).hexdigest()==IMAGE_HASH,"이미지 체크섬 불일치")
         check(initial["firmware"])
     if action=="rollback":
         if initial.get("firmware")!=STOCK_VERSION:
-            require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth","0.4.3-keyberth",VERSION),"지원하는 키버스-펌웨어만 롤백할 수 있습니다.")
+            require(initial.get("firmware") in (PREVIOUS_VERSION,"0.3.0-keyberth","0.4.0-keyberth","0.4.1-keyberth","0.4.2-keyberth","0.4.3-keyberth","0.4.4-keyberth",VERSION),"지원하는 키버스-펌웨어만 롤백할 수 있습니다.")
             check(initial["firmware"])
             stage("정품 부팅 요청")
             with serial.Serial(port.device,115200,timeout=1) as link:
@@ -172,17 +191,17 @@ def run(action, image):
     content=image.read_bytes()
     require(hashlib.sha256(content).hexdigest()==IMAGE_HASH,"시험 이미지 체크섬 불일치")
     work=Path(tempfile.mkdtemp(prefix="install-",dir=ROOT))
-    def rom(*args, stub=True, reset=False):
+    def rom(*args, stub=True, reset=False, progress=None):
         # macOS can briefly remove the serial node between ROM commands.
         # Retry discovery on the original port only, before issuing the command.
         path=wait_for(lambda:usb(0x1001,location),5).device
-        output=io.StringIO()
+        output=BackupProgress(progress) if progress else io.StringIO()
         with contextlib.redirect_stdout(output):
             esptool.main(["--chip","esp32s3","--port",path,"--before","no_reset","--after","watchdog_reset" if reset else "no_reset",
                           *(["--baud","921600"] if stub else ["--no-stub"]),*map(str,args)])
         return output.getvalue()
-    def read(start,length,file):
-        rom("read_flash",hex(start),hex(length),file)
+    def read(start,length,file,progress=None):
+        rom("read_flash",hex(start),hex(length),file,progress=progress)
         data=file.read_bytes()
         require(len(data)==length,"플래시 읽기 길이 불일치")
         return data
@@ -212,12 +231,14 @@ def run(action, image):
                 continue
             first,second=[identity.parent/f"flash-{n}.bin" for n in (1,2)]
             if first.is_file() and second.is_file():
+                stage("기존 전체 백업 두 개 일치 검증")
                 verify(first,second);backup=first;break
         if backup is None:
             print("동일 기기의 전체 백업 두 개를 생성하고 있습니다.",flush=True)
             first,second=[work/f"flash-{n}.bin" for n in (1,2)]
-            for file in (first,second):
-                read(0,0x1000000,file)
+            for index,file in enumerate((first,second),1):
+                read(0,0x1000000,file,progress=f"복구 백업 {index}/2 읽기")
+            stage("두 전체 백업 일치 검증")
             verify(first,second)
             (work/"identity.json").write_text(json.dumps({"mac":mac}))
             backup=first

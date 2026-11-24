@@ -3,14 +3,14 @@ import AppKit
 import MicroCore
 
 enum CmuxClient {
-    static func run(_ args: [String], executable: String = "/Applications/cmux.app/Contents/Resources/bin/cmux") throws -> Data {
+    static func run(_ args: [String], executable: String = "/Applications/cmux.app/Contents/Resources/bin/cmux", timeout: TimeInterval = 4) throws -> Data {
         let process = Process(), output = Pipe()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
         process.standardOutput = output
         process.standardError = output
         try process.run()
-        let deadline = ProcessInfo.processInfo.systemUptime + 4
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
         let fd = output.fileHandleForReading.fileDescriptor
         var data = Data(), bytes = [UInt8](repeating: 0, count: 8192)
         while ProcessInfo.processInfo.systemUptime < deadline && data.count <= 8_000_000 {
@@ -27,7 +27,7 @@ enum CmuxClient {
             data.append(contentsOf: bytes.prefix(n))
         }
         if process.isRunning { process.terminate() }
-        throw CompanionError("cmux 응답 시간 또는 크기 제한 초과")
+        throw CompanionError(URL(fileURLWithPath:executable).lastPathComponent + " 응답 시간 또는 크기 제한 초과")
     }
     static func list() throws -> [CmuxTarget] {
         try CmuxTarget.targets(run(["--json", "--id-format", "uuids", "tree", "--all"]))

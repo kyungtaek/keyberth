@@ -116,12 +116,19 @@ bool allowed_peer(const ble_gap_conn_desc& desc) {
         std::memcmp(peers[0].val,desc.peer_id_addr.val,6)==0;
 }
 int gap(ble_gap_event*,void*);
+const char* channel_name() {
+    switch(kb::prefs.channel) {
+        case 2:return "AI Micro 2";
+        case 3:return "AI Micro 3";
+        default:return "AI Micro";
+    }
+}
 void advertise() {
     if(!synced||!enabled||connected||ble_gap_adv_active())return;
     ble_hs_adv_fields fields{};fields.flags=BLE_HS_ADV_F_DISC_GEN|BLE_HS_ADV_F_BREDR_UNSUP;
     fields.appearance=0x03C1;fields.appearance_is_present=1;
     fields.uuids16=&hid_uuid;fields.num_uuids16=1;fields.uuids16_is_complete=1;
-    const char* name="AI Micro";fields.name=reinterpret_cast<const uint8_t*>(name);fields.name_len=std::strlen(name);fields.name_is_complete=1;
+    const char* name=channel_name();fields.name=reinterpret_cast<const uint8_t*>(name);fields.name_len=std::strlen(name);fields.name_is_complete=1;
     if(ble_gap_adv_set_fields(&fields)) {ESP_LOGE("basic_ble","advertising fields failed");return;}
     ble_gap_adv_params params{};params.conn_mode=BLE_GAP_CONN_MODE_UND;params.disc_mode=BLE_GAP_DISC_MODE_GEN;
     int rc=ble_gap_adv_start(BLE_OWN_ADDR_RANDOM,nullptr,BLE_HS_FOREVER,&params,gap,nullptr);
@@ -182,7 +189,11 @@ int gap(ble_gap_event* e,void*) {
 void sync() {
     uint8_t mac[6]{};ESP_ERROR_CHECK(esp_read_mac(mac,ESP_MAC_BT));
     uint8_t addr[6];for(int i=0;i<6;++i)addr[i]=mac[5-i];
-    addr[0]^=0x42;addr[5]|=0xC0;
+    // Keep channel one's legacy identity. Each other channel must have a stable
+    // identity of its own so hosts can retain independent encryption keys.
+    addr[0]^=0x42;
+    addr[4]^=static_cast<uint8_t>((kb::prefs.channel-1)<<6);
+    addr[5]|=0xC0;
     if(ble_hs_id_set_rnd(addr)) {ESP_LOGE("basic_ble","identity failed");return;}
     synced=true;refresh_bonds();advertise();
 }
@@ -190,7 +201,7 @@ void host(void*) {nimble_port_run();nimble_port_freertos_deinit();}
 }
 esp_err_t ble_begin(Receive receive) {
     receiver=receive;esp_err_t err=nimble_port_init();if(err!=ESP_OK)return err;
-    ble_svc_gap_init();ble_svc_gatt_init();ble_svc_gap_device_name_set("AI Micro");ble_svc_gap_device_appearance_set(0x03C1);
+    ble_svc_gap_init();ble_svc_gatt_init();ble_svc_gap_device_name_set(channel_name());ble_svc_gap_device_appearance_set(0x03C1);
     ble_hs_cfg.sync_cb=sync;ble_hs_cfg.sm_io_cap=BLE_HS_IO_NO_INPUT_OUTPUT;
     ble_hs_cfg.sm_bonding=1;ble_hs_cfg.sm_sc=1;
     ble_hs_cfg.sm_our_key_dist=BLE_SM_PAIR_KEY_DIST_ENC|BLE_SM_PAIR_KEY_DIST_ID;

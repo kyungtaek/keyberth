@@ -1,6 +1,6 @@
 # 키버스-펌웨어
 
-AI Micro ESP32-S3용 개발 버전은 `0.4.4-keyberth`다. 펌웨어 버전은 앱과 독립적으로 `VERSION`에서 관리한다. 제조사가 MIT로 공개한 AI Micro Basic 0.1.0에서 보드 드라이버, HID/CDC와 ROM 복구 경로를 가져왔다. 원본 소스 ZIP의 SHA-256은 `fe5c2d523e76d482c63703adec0264ea1f6a7143add33bd7a3f2ad49854d825b`다. Universal Agent 0.2.18의 USB 동작을 호환 기준으로 삼았다. [제조사 소스 배포본](https://micro.diyshare.cn/downloads/ai-micro-basic/0.1.0/ai-micro-basic-0.1.0-source.zip) · [라이선스](LICENSE)
+AI Micro ESP32-S3용 개발 버전은 `0.4.5-keyberth`다. 펌웨어 버전은 앱과 독립적으로 `VERSION`에서 관리한다. 제조사가 MIT로 공개한 AI Micro Basic 0.1.0에서 보드 드라이버, HID/CDC와 ROM 복구 경로를 가져왔다. 원본 소스 ZIP의 SHA-256은 `fe5c2d523e76d482c63703adec0264ea1f6a7143add33bd7a3f2ad49854d825b`다. Universal Agent 0.2.18의 USB 동작을 호환 기준으로 삼았다. [제조사 소스 배포본](https://micro.diyshare.cn/downloads/ai-micro-basic/0.1.0/ai-micro-basic-0.1.0-source.zip) · [라이선스](LICENSE)
 
 ## 빌드와 연결
 
@@ -20,11 +20,13 @@ USB VID/PID는 303A:8360이다. CDC의 `UPDATE_INFO`와 report 7의 `AMHELLO`가
 
 Mac의 Bluetooth 설정에서 **AI Micro**를 선택해 처음 한 번 페어링한다. Keyberth는 USB를 뽑으면 무선 HID로 다시 연결하고, USB를 연결하면 유선 입력을 우선한다. 정품에 등록된 Mac도 개발 펌웨어에서는 처음에 페어링이 필요하다.
 
+0.4.5에서 1번은 기존 Bluetooth 주소를 유지합니다. 2·3번은 각각 새 주소와 독립 페어링 저장소를 사용하므로 처음 한 번 ‘AI Micro 2’ 또는 ‘AI Micro 3’으로 등록합니다.
+
 터치 버튼을 약 3초 누른 뒤 떼면 채널 선택이 시작된다. 짧게 터치할 때마다 1 → 2 → 3 순으로 바뀌고 약 5초 뒤 확정된다. 선택 중 같은 버튼을 다시 길게 누르면 선택한 채널의 페어링을 지운다. Mac에도 이전 등록이 남아 있다면 해당 기기를 지운 뒤 다시 페어링한다.
 
 배터리에서 자동 절전에 들어간 뒤 노브 또는 전원 버튼을 짧게 누르면 깨어난다. 자동 절전 시간을 0분으로 지정하면 자동 절전이 꺼진다. 기기 설정의 부저 볼륨은 0~100%이며 전원 버튼을 빠르게 두 번 눌러 음소거를 전환한다.
 
-0.4.4 설치 관리자는 정품 파티션 표를 검증한 뒤 두 OTA 슬롯을 검사한다. 기존 제조사 이미지가 있는 슬롯은 보존하고, 비어 있거나 알려진 키버스 이미지가 있는 슬롯을 선택한다. 두 슬롯 모두 다른 데이터가 있으면 쓰기 전에 중단한다.
+0.4.5 설치 관리자는 정품 파티션 표를 검증한 뒤 두 OTA 슬롯을 검사한다. 기존 제조사 이미지가 있는 슬롯은 보존하고, 비어 있거나 알려진 키버스 이미지가 있는 슬롯을 선택한다. 두 슬롯 모두 다른 데이터가 있으면 쓰기 전에 중단한다.
 
 ## 기기 조명 설정 (0.4.0 이상)
 

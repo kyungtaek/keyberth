@@ -10,6 +10,8 @@ enum DesktopShortcut {
         "=":24,"-":27,"[":33,"]":30,"enter":36,"l":37,"j":38,"k":40,"n":45,"m":46,"tab":48,"space":49,"backspace":51,
         "escape":53,"f5":96,"f6":97,"f7":98,"f3":99,"f8":100,"f9":101,"f11":103,
         "f10":109,"f12":111,"home":115,"delete":117,"f4":118,"end":119,"f2":120,"f1":122,
+        "comma":43,"period":47,"slash":44,"backslash":42,"semicolon":41,"quote":39,"backquote":50,
+        "pageup":116,"pagedown":121,"numpadadd":69,"numpadsubtract":78,
         "left":123,"right":124,"down":125,"up":126
     ]
     static let flags: [String:CGEventFlags] = ["cmd":.maskCommand, "ctrl":.maskControl, "alt":.maskAlternate, "shift":.maskShift]
@@ -20,6 +22,11 @@ enum DesktopShortcut {
     }
 
     @MainActor static func send(_ chord: String, to profile: AppProfile) throws {
+        let release = try press(chord,to:profile)
+        release()
+    }
+
+    @MainActor static func press(_ chord: String, to profile: AppProfile) throws -> () -> Void {
         guard valid(chord), let last = chord.components(separatedBy: "+").last, let code = codes[last] else {
             throw CompanionError("사용할 수 없는 단축키입니다.")
         }
@@ -38,6 +45,6 @@ enum DesktopShortcut {
         down.flags = modifiers
         up.flags = modifiers
         down.postToPid(target.processIdentifier)
-        up.postToPid(target.processIdentifier)
+        return { if !target.isTerminated { up.postToPid(target.processIdentifier) } }
     }
 }

@@ -190,6 +190,15 @@ function buildFunctions(profile,currentMappings={...state?.globalMappings,...ove
     const actions=Object.entries(catalog.agentActions[profile] || {}).sort(([a],[b])=>a.localeCompare(b));
     if(actions.some(([id])=>id.startsWith('recent.'))) groups.push(['최근 세션',actions.filter(([id])=>id.startsWith('recent.'))]);
     if(actions.some(([id])=>id.startsWith('agent.'))) groups.push(['대화 제어',actions.filter(([id])=>id.startsWith('agent.') && !id.startsWith('agent.t3.'))]);
+    if(profile==='app.com.stablyai.orca') {
+      const sections=new Map();
+      for(const entry of actions) {
+        const group=catalog.orcaGroups[entry[0]];
+        if(!sections.has(group)) sections.set(group,[]);
+        sections.get(group).push(entry);
+      }
+      groups.push(...sections);
+    }
     if(profile==='t3') groups.push(['T3 명령',actions.filter(([id])=>id.startsWith('agent.t3.') || id==='agent.settle')]);
     if(profile==='slack') groups.push(['Slack', catalog.slackActions.map(x=>[x.id,x.name])]);
     if(profile==='obsidian') groups.push(['Obsidian', [['cmd+o','빠른 전환'],['cmd+p','명령 팔레트'],['cmd+n','새 노트']]]);
@@ -217,7 +226,8 @@ function buildFunctions(profile,currentMappings={...state?.globalMappings,...ove
   for(const [title,entries] of groups) {
     $('category').add(new Option(title,title));
     for(const [id,label] of entries) {
-      const choice=button(label,'choice',()=>{draft().action=id;renderMapping();});
+      const needsShortcut=catalog.orcaNeedsShortcut?.includes(id);
+      const choice=button(needsShortcut ? label+' · Orca 단축키 지정 필요' : label,'choice',()=>{draft().action=id;renderMapping();});
       choice.dataset.id=id;choice.dataset.category=title;$('actionList').append(choice);
     }
   }
@@ -374,7 +384,7 @@ function renderState(next) {
   $('usb').title=next.usb;$('cmux').title=next.cmux;
   $('connect').disabled=next.busy;
   $('lightStatus').textContent=next.lightingStatus;
-  $('firmwareName').textContent=next.usb?.includes('0.4.4-keyberth') ? '키버스-펌웨어 / 0.4.4' : next.usb?.includes('0.4.3-keyberth') ? '키버스-펌웨어 / 0.4.3' : next.usb?.includes('0.4.2-keyberth') ? '키버스-펌웨어 / 0.4.2' : next.usb?.includes('0.4.1-keyberth') ? '키버스-펌웨어 / 0.4.1' : next.usb?.includes('0.4.0-keyberth') ? '키버스-펌웨어 / 0.4.0' : next.usb?.includes('0.3.0-keyberth') ? '키버스-펌웨어 / 0.3.0' : next.usb?.includes('0.2.0-keyberth') ? '키버스-펌웨어 / 0.2.0' : next.usb?.includes('0.1.0-keyberth-dev') ? 'Keyberth USB / 0.1.0-dev' : next.usb?.includes('0.2.18') ? 'Universal Agent / 0.2.18' : 'AI Micro';
+  $('firmwareName').textContent=next.usb?.includes('0.4.5-keyberth') ? '키버스-펌웨어 / 0.4.5' : next.usb?.includes('0.4.4-keyberth') ? '키버스-펌웨어 / 0.4.4' : next.usb?.includes('0.4.3-keyberth') ? '키버스-펌웨어 / 0.4.3' : next.usb?.includes('0.4.2-keyberth') ? '키버스-펌웨어 / 0.4.2' : next.usb?.includes('0.4.1-keyberth') ? '키버스-펌웨어 / 0.4.1' : next.usb?.includes('0.4.0-keyberth') ? '키버스-펌웨어 / 0.4.0' : next.usb?.includes('0.3.0-keyberth') ? '키버스-펌웨어 / 0.3.0' : next.usb?.includes('0.2.0-keyberth') ? '키버스-펌웨어 / 0.2.0' : next.usb?.includes('0.1.0-keyberth-dev') ? 'Keyberth USB / 0.1.0-dev' : next.usb?.includes('0.2.18') ? 'Universal Agent / 0.2.18' : 'AI Micro';
   for(const [i,local] of next.slots.entries()){
     const input='K'+String(i+1).padStart(2,'0');
     const value=next.mappings[input] || '';
@@ -720,7 +730,8 @@ let liveStageTimer;
 async function updateLiveStage() {
   try {
     const active=(await api('firmwareHistory')).find(record=>!record.some(entry=>entry.result));
-    if (firmwareWait.open) $('firmwareLiveStage').textContent=active?.at(-1)?.stage ?? '';
+    const latest=active?.at(-1);
+    if (firmwareWait.open) $('firmwareLiveStage').textContent=latest ? latest.stage+(Number.isInteger(latest.percent) ? ' · '+latest.percent+'%' : '') : '';
   } catch { /* The next poll retries while the progress dialog is open. */ }
 }
 window.keyberth.onFirmwareProgress(message=>{

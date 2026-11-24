@@ -43,49 +43,26 @@ int persist() {
     return e==ESP_OK?0:BLE_HS_ESTORE_FAIL;
 }
 // Each channel owns at most one peer. Preserve its local identity when removing the peer.
-esp_err_t clear_channel(unsigned channel,const ble_addr_t* movedPeer) {
-    static constexpr const char* names[]={"ble1","ble2","ble3"};
+esp_err_t clear_channel(unsigned channel) {
+    static constexpr const char* names[]={"ble1","ble2_v2","ble3_v2"};
     if(channel<1||channel>3)return ESP_ERR_INVALID_ARG;
     const char* name=names[channel-1];
     if(!std::strcmp(name,kb::bond_namespace()))return ESP_ERR_INVALID_STATE;
     nvs_handle_t h{};
     auto err=nvs_open_from_partition("kb_nvs",name,NVS_READWRITE,&h);
     if(err!=ESP_OK)return err;
-    bool erase=movedPeer==nullptr;
-    if(movedPeer) {
-        Store old{};
-        size_t size=sizeof(old);
-        err=nvs_get_blob(h,"records",&old,&size);
-        if(err==ESP_OK) {
-            if(size!=sizeof(old)||old.version!=1||old.count>old.records.size())err=ESP_ERR_INVALID_STATE;
-            else for(unsigned i=0;i<old.count;++i) {
-                const auto& entry=old.records[i];
-                if(entry.type==BLE_STORE_OBJ_TYPE_PEER_SEC &&
-                   ble_addr_cmp(&entry.value.sec.peer_addr,movedPeer)==0)erase=true;
-            }
-        }
-    }
-    if(erase&&err==ESP_OK) {
-        err=nvs_erase_key(h,"records");
-        if(err==ESP_OK)err=nvs_commit(h);
-    }
+    err=nvs_erase_key(h,"records");
+    if(err==ESP_OK)err=nvs_commit(h);
     nvs_close(h);
     return err==ESP_ERR_NVS_NOT_FOUND?ESP_OK:err;
 }
 int write(int type,const ble_store_value* v) {
     int rc=ble_store_config_write(type,v);
-    if(rc)return rc;
-    rc=persist();
-    if(!rc && type==BLE_STORE_OBJ_TYPE_PEER_SEC && v->sec.ltk_present) {
-        for(unsigned ch=1;ch<=3;++ch) {
-            if(ch!=kb::prefs.channel && clear_channel(ch,&v->sec.peer_addr)!=ESP_OK)return BLE_HS_ESTORE_FAIL;
-        }
-    }
-    return rc;
+    return rc?rc:persist();
 }
 int remove(int type,const ble_store_key* k) {int rc=ble_store_config_delete(type,k);return rc?rc:persist();}
 }
-esp_err_t forget_inactive_channel(unsigned channel) {return clear_channel(channel,nullptr);}
+esp_err_t forget_inactive_channel(unsigned channel) {return clear_channel(channel);}
 esp_err_t bonds_begin() {
     // 仅初始化独立分区。错误时返回，不使用擦除全部 NVS 的示例兜底。
     esp_err_t e=nvs_flash_init_partition("kb_nvs");if(e!=ESP_OK)return e;

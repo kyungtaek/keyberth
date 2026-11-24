@@ -12,7 +12,7 @@ function history(app) {
     function add(stage,details={}) {
       fs.appendFileSync(file,JSON.stringify({time:Date.now()/1000,stage,...details})+'\n',{mode:0o600});
     }
-    add('작업 요청',{id,action,app:app.getVersion(),macOS:process.getSystemVersion?.(),macOSKernel:os.release(),arch:process.arch,target:'0.4.4'});
+    add('작업 요청',{id,action,app:app.getVersion(),macOS:process.getSystemVersion?.(),macOSKernel:os.release(),arch:process.arch,target:'0.4.5'});
     for(const old of files().slice(50)) fs.unlinkSync(path.join(dir,old));
     return {id,file,add,read:()=>read(file)};
   }

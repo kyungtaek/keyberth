@@ -14,7 +14,7 @@ bool initialized=false;
 static nvs_handle_t handle;
 static unsigned bootChannel=1;
 const char* bond_namespace() {
-    static const char* names[]={"ble1","ble2","ble3"};
+    static const char* names[]={"ble1","ble2_v2","ble3_v2"};
     return names[bootChannel-1];
 }
 esp_err_t init_settings() {
@@ -48,7 +48,7 @@ esp_err_t init_settings() {
     err=nvs_get_u8(maintenance,"reset",&reset);
     if(err!=ESP_OK && err!=ESP_ERR_NVS_NOT_FOUND){nvs_close(maintenance);return err;}
     if(reset) {
-        for(const char* name:{"settings","ble1","ble2","ble3"}) {
+        for(const char* name:{"settings","ble1","ble2","ble3","ble2_v2","ble3_v2"}) {
             nvs_handle_t h;
             if((err=nvs_open_from_partition("kb_nvs",name,NVS_READWRITE,&h))!=ESP_OK)break;
             err=nvs_erase_all(h);

@@ -33,9 +33,9 @@ enum KeyMap {
         saved == "inherit" ? nil : saved
     }
     static func preset(_ profile: AppProfile) -> [String:String] {
-        guard [.codex,.t3,.cmux].contains(profile) else { return [:] }
+        guard [.codex,.t3,.cmux,.orca].contains(profile) else { return [:] }
         var bindings = [String:String]()
-        for key in keys.dropFirst(6) + stick + knob {
+        for key in Array(keys.dropFirst(6)) + stick + knob + (profile == .orca ? ["ENC_PRESS"] : []) {
             let value = profile.defaultBinding(key)
             if value != "none" { bindings[key] = value }
         }
