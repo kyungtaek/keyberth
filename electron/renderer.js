@@ -131,6 +131,10 @@ function simulating() { return view==='device' && !$('lighting').hidden; }
 function createKey(id, icon) {
   const number = id.startsWith('K');
   const b = button('', number ? 'cap' : 'smallKey', () => {
+    if(view==='device' && !$('hardware').hidden && number) {
+      selectLightTarget(Number(id.slice(1)));
+      return;
+    }
     if(simulating()) {previewKey=id; renderPreview();return;}
     if(view==='sessions') {slotButtons[Number(id.slice(1))-1]?.click();return;}
     selected=id;categoryOverride='';renderMapping();
@@ -216,8 +220,11 @@ function buildFunctions(profile,currentMappings={...state?.globalMappings,...ove
     byMenu.get(top).push([id,rest.join(' › ')]);
   }
   for(const [top,actions] of byMenu) groups.push(['앱 메뉴 · '+top,actions]);
-  groups.push(['대상 앱 지정',Object.entries(catalog.targetActions || {})], ['앱 전환',Object.entries(catalog.favorites).map(([id,name])=>['launch.'+id,name+' 열기'])],
-              ['시스템 동작',Object.entries(catalog.systemActions)]);
+  groups.push(['대상 앱 지정',Object.entries(catalog.targetActions || {})], ['앱 전환',[
+                ...Object.entries(catalog.systemActions).filter(([id])=>id.startsWith('apps.')),
+                ...Object.entries(catalog.favorites).map(([id,name])=>['launch.'+id,name+' 열기'])
+              ]],
+              ['시스템 동작',Object.entries(catalog.systemActions).filter(([id])=>!id.startsWith('apps.'))]);
   const known=new Set(groups.flatMap(([,entries])=>entries.map(([id])=>id)));
   const missing=[...new Set(Object.values(currentMappings))].filter(id=>storedActionLabel(id) && !known.has(id));
   if(missing.length) groups.push(['저장된 배정',missing.map(id=>[id,storedActionLabel(id)])]);
@@ -280,6 +287,7 @@ function renderMapping() {
   }
   $('keyTitle').textContent=selected.startsWith('K')?Number(selected.slice(1))+'번 키':byId.get(selected).name;
   $('capMaterialField').hidden=!buttons.get(selected)?.dataset.material;
+  $('editKeyLight').hidden=$('capMaterialField').hidden;
   if(!$('capMaterialField').hidden)$('capMaterial').value=capMaterial(selected);
   $('keyId').textContent=selected;$('current').textContent=actionText(saved);
   const desktop = globalEdit() || editProfile !== 'cmux';
@@ -496,20 +504,27 @@ function renderPreview() {
   const priority=['작업공간 입력 요청','작업공간 실행 중','작업공간 완료','현재 터미널','대기','상태 미확인','빈 슬롯'];
   const ambientState=liveSlots.find(s=>s.active && s.target)?.state ||
     priority.find(name=>liveSlots.some(s=>s.target && s.state===name)) || '빈 슬롯';
-  paintLamp($('underglow'),sample ? rule?.ambient : lightRules?.[ambientState]?.ambient);
+  const hardware=view==='device' && !$('hardware').hidden && Array.isArray(prefs?.styles);
+  function paintTarget(lamp,index,automatic){
+    const style=hardware && editedStyles[index];
+    paintLamp(lamp,style ? {color:'#'+style.slice(0,6),effect:Number(style[6])} : automatic);
+    lamp.style.filter=hardware ? 'brightness('+(+$('masterLight').value/100)*(style ? parseInt(style.slice(7,9),16)/100 : 1)+')' : '';
+    lamp.style.animationDuration=style ? (3.5-0.027*parseInt(style.slice(9),16))+'s' : '';
+  }
+  paintTarget($('underglow'),0,sample ? rule?.ambient : lightRules?.[ambientState]?.ambient);
   for(const [id,b] of buttons) {
     const i=/^K0[1-6]$/.test(id)?Number(id.slice(1))-1:-1;
     const slot=liveSlots[i];
-    b.disabled=view==='sessions' ? !slot?.target || state.busy : view==='device' && (!sample || i<0);
-    if(view!=='mapping') b.setAttribute('aria-pressed',String(sample ? id===previewKey : !!slot?.active));
+    b.disabled=view==='sessions' ? !slot?.target || state.busy : view==='device' && (hardware ? !b.dataset.material || prefsBusy : !sample || i<0);
+    if(view!=='mapping') b.setAttribute('aria-pressed',String(hardware ? id.startsWith('K') && Number(id.slice(1))===lightTarget : sample ? id===previewKey : !!slot?.active));
     const lamp=b.querySelector('.lamp');
     if(!lamp) continue;
     const live=slot?.target && (lightRules?.[slot.state]?.slot || {color:slot.lightColor,effect:slot.lightColor && slot.lightColor!=='transparent'?1:0});
-    paintLamp(lamp,sample ? (id===previewKey ? rule?.slot : null) : view==='mapping' ? null : live);
+    paintTarget(lamp,Number(id.slice(1)),sample ? (id===previewKey ? rule?.slot : null) : view==='mapping' ? null : live);
   }
   $('board').classList.toggle('simulation',sample);
   $('previewCaption').hidden=view==='mapping';
-  $('previewCaption').textContent=sample ? Number(previewKey.slice(1))+'번 키 · '+key+' 미리보기' : '현재 세션 조명';
+  $('previewCaption').textContent=hardware ? $('lightTargetName').textContent+' 미리보기' : sample ? Number(previewKey.slice(1))+'번 키 · '+key+' 미리보기' : '현재 세션 조명';
 }
 function renderLights() {
   syncPicker($('lightState'),$('lightBar'));
@@ -538,8 +553,12 @@ $('saveLight').onclick=async()=>{
     announce('조명 설정을 이 Mac에 저장했습니다.');
   } catch(e){fail(e);} finally{savingLight=false;renderLights();}
 };
-let editedStyles=[], lightTarget=0;
+let editedStyles=[], lightTarget=0, focusLightAfterRead=false;
 const physicalFields=['physicalColor','physicalEffect','physicalLevel','physicalSpeed'];
+function selectLightTarget(index){
+  lightTarget=index;
+  showPhysicalTarget();
+}
 function showPhysicalTarget(){
   const style=editedStyles[lightTarget]||'';
   const fallback=style||'ffffff16432';
@@ -555,7 +574,7 @@ function showPhysicalTarget(){
 for(let i=0;i<14;i++){
   const button=document.createElement('button');button.value=String(i);button.textContent=i?String(i).padStart(2,'0'):'바닥';
   button.setAttribute('aria-label',i?i+'번 키 조명':'바닥 조명');
-  button.onclick=()=>{lightTarget=i;showPhysicalTarget();};$('lightTargets').append(button);
+  button.onclick=()=>selectLightTarget(i);$('lightTargets').append(button);
 }
 function capturePhysicalStyle(){
   const hex=id=>Number($(id).value).toString(16).padStart(2,'0');
@@ -567,6 +586,8 @@ function capturePhysicalStyle(){
 for(const id of [...physicalFields,'overrideLight'])$(id).oninput=capturePhysicalStyle;
 $('masterLight').oninput=()=>updatePrefsButtons();
 function updatePrefsButtons(){
+  for(const button of $('lightTargets').children)button.disabled=prefsBusy;
+  renderPreview();
   const n=$('sleep').valueAsNumber;
   $('sleep').disabled=$('volume').disabled=!prefs||prefsBusy;
   const hasLights=Array.isArray(prefs?.styles);
@@ -590,7 +611,7 @@ async function device(save){
     $('sleep').value=prefs.sleep;$('volume').value=prefs.volume;$('buzzer').textContent=prefs.buzzer?'':'기기의 부저 스위치가 꺼져 있습니다.';
     if(save)announce('기기에서 저장된 값을 확인했습니다.');
   }catch(e){prefs=null;$('buzzer').textContent=e.message;}
-  finally{prefsBusy=false;updatePrefsButtons();}
+  finally{prefsBusy=false;updatePrefsButtons();if(focusLightAfterRead){focusLightAfterRead=false;focusLightEditor();}}
 }
 function fillProcesses(){
   const picker=$('profile');picker.replaceChildren(new Option('프로세스 선택…',''));
@@ -628,6 +649,21 @@ function settingsPanel(id) {
 }
 for(const tab of document.querySelectorAll('[data-panel]')) tab.onclick=()=>settingsPanel(tab.dataset.panel);
 settingsPanel('hardware');
+$('editKeyLight').onclick=()=>{
+  selectLightTarget(Number(selected.slice(1)));
+  settingsPanel('hardware');
+  show('device');
+  if(prefsBusy)focusLightAfterRead=true;else focusLightEditor();
+};
+function focusLightEditor(){
+  if(view!=='device' || $('hardware').hidden)return;
+  if(Array.isArray(prefs?.styles)){
+    $('targetEditor').scrollIntoView({block:'nearest'});
+    $('overrideLight').focus({preventScroll:true});
+  }else{
+    $('buzzer').textContent ||= '개별 LED 설정은 키버스 펌웨어가 설치된 기기를 USB로 연결한 뒤 사용할 수 있습니다.';
+  }
+}
 let firmwareRecords=[];
 function showFirmwareRecord() {
   const record=firmwareRecords[$('firmwareRecord').selectedIndex];

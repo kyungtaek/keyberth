@@ -3,6 +3,25 @@ import MicroCore
 @testable import MicroCompanion
 
 final class KnobMappingTests: XCTestCase {
+    func testFavoriteCycleWrapsAndEntersFromAnotherApp() {
+        let apps = ["z":"Alpha", "a":"Beta"]
+        func next(_ id:String?, forward:Bool = true) -> String? {
+            MacActions.adjacentFavorite(forward:forward,current:id,apps:apps)
+        }
+        XCTAssertEqual(next("z"),"a")
+        XCTAssertEqual(next("a"),"z")
+        XCTAssertEqual(next("z",forward:false),"a")
+        XCTAssertEqual(next(nil),"z")
+        XCTAssertEqual(next("other",forward:false),"a")
+        XCTAssertNil(MacActions.adjacentFavorite(forward:true,current:nil,apps:[:]))
+    }
+
+    func testNavigationActionsAreAvailableInBothLayers() throws {
+        for action in ["system.scrollUp","system.scrollDown","system.pageUp","system.pageDown","apps.nextFavorite","apps.previousFavorite"] {
+            try KeymapArchive(global:["ENC_CW":action],version:2,profiles:["cmux":["K07":action]],claudeSlots:nil).validate()
+        }
+    }
+
     func testCodexPickerActionsCanBeAssignedToKnob() throws {
         for step in [CodexControls.PickerStep.next, .previous, .up, .down] {
             XCTAssertNotNil(AppProfile.codex.agentActions[step.rawValue])

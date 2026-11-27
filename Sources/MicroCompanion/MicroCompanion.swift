@@ -479,6 +479,18 @@ import MicroCore
             }
             return
         }
+        if binding == "apps.nextFavorite" || binding == "apps.previousFavorite" {
+            guard let id = MacActions.adjacentFavorite(forward:binding == "apps.nextFavorite",
+                current:NSWorkspace.shared.frontmostApplication?.bundleIdentifier,apps:MacActions.favorites) else {
+                hud("기기 설정에서 전환할 앱을 즐겨찾기에 추가하세요.")
+                return
+            }
+            Task {
+                do { try await MacActions.launch(id); feedback = "" }
+                catch { feedback = error.localizedDescription; hud(feedback) }
+            }
+            return
+        }
         if let id = MacActions.appID(binding) {
             Task {
                 do { try await MacActions.launch(id); feedback = "" }

@@ -11,6 +11,9 @@ enum MacActions {
         target.profile.title + " · " + (target.mic ? "누르고 받아쓰기" : target.profile == .cmux ? "새 워크스페이스" : "새 대화")
     }
     static let system = [
+        "system.scrollUp":"마우스 휠 위로 스크롤", "system.scrollDown":"마우스 휠 아래로 스크롤",
+        "system.pageUp":"페이지 업", "system.pageDown":"페이지 다운",
+        "apps.nextFavorite":"다음 즐겨찾기 앱", "apps.previousFavorite":"이전 즐겨찾기 앱",
         "system.screenshot":"스크린샷 · 영역 선택", "system.sleep":"Mac 잠자기",
         "system.missionControl":"미션 컨트롤", "system.volumeUp":"볼륨 올리기",
         "system.volumeDown":"볼륨 내리기", "system.mute":"음소거 전환",
@@ -48,7 +51,32 @@ enum MacActions {
         config.activates = true
         _ = try await NSWorkspace.shared.openApplication(at:url,configuration:config)
     }
+    static func adjacentFavorite(forward:Bool, current:String?, apps:[String:String]) -> String? {
+        let ordered = apps.keys.sorted { a,b in
+            let order = apps[a]!.localizedStandardCompare(apps[b]!)
+            return order == .orderedSame ? a < b : order == .orderedAscending
+        }
+        guard let current, let index = ordered.firstIndex(of:current) else {
+            return forward ? ordered.first : ordered.last
+        }
+        return ordered[(index + (forward ? 1 : ordered.count - 1)) % ordered.count]
+    }
     @MainActor static func perform(_ action:String) throws {
+        if action == "system.scrollUp" || action == "system.scrollDown" {
+            guard CGPreflightPostEventAccess() else { throw CompanionError("손쉬운 사용 권한이 필요합니다.") }
+            guard let event = CGEvent(scrollWheelEvent2Source:nil,units:.line,wheelCount:1,
+                                      wheel1:action == "system.scrollUp" ? 1 : -1,wheel2:0,wheel3:0) else {
+                throw CompanionError("스크롤 입력을 만들 수 없습니다.")
+            }
+            event.post(tap:.cghidEventTap)
+            return
+        }
+        if action == "system.pageUp" || action == "system.pageDown" {
+            guard let bundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+                  let profile = AppProfile(rawValue:"app."+bundle) else { throw CompanionError("현재 앱을 확인하세요.") }
+            try DesktopShortcut.send(action == "system.pageUp" ? "pageup" : "pagedown",to:profile)
+            return
+        }
         if action == "system.sleep" {
             _ = try CmuxClient.run(["sleepnow"],executable:"/usr/bin/pmset")
             return
